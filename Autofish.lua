@@ -11,7 +11,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 
-local MaxFishCapacity = 50
+-- MENGUBAH KAPASITAS MAKSIMAL IKAN MENJADI 200
+local MaxFishCapacity = 200
 
 local isRunning = false
 local isAntiAfkOn = false
