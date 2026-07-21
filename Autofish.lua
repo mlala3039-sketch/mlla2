@@ -7,6 +7,9 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local VirtualUser = game:GetService("VirtualUser")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
 
 local MaxFishCapacity = 50
 
@@ -17,6 +20,15 @@ local savedSellPosition = nil
 local savedFishPosition = nil
 local currentFishCaught = 0
 
+-- Variabel Fly
+local isFlying = false
+local flySpeedLevel = 5
+local flySpeedMultiplier = 15
+local actualFlySpeed = flySpeedLevel * flySpeedMultiplier
+local flyBodyVelocity = nil
+local flyBodyGyro = nil
+local flyConnection = nil
+
 -- Daftar rod & index yang dipilih
 local SUPPORTED_RODS = {
     "ZombieRod",
@@ -24,10 +36,10 @@ local SUPPORTED_RODS = {
     "DarkBladeRod",
     "ZeusRod",
 }
-local selectedRodIndex = 1 -- Default: ZombieRod
+local selectedRodIndex = 1
 
 -- ==========================================
--- GUI MANCING
+-- GABUNGAN GUI UTAMA (MANCING & TERBANG)
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -47,16 +59,23 @@ local RodPrevButton = Instance.new("TextButton")
 local RodNextButton = Instance.new("TextButton")
 local RodNameLabel = Instance.new("TextLabel")
 
+-- Komponen Fly di dalam UI Utama
+local FlySeparator = Instance.new("Frame")
+local FlyToggleButton = Instance.new("TextButton")
+local FlySpeedMinusBtn = Instance.new("TextButton")
+local FlySpeedLabel = Instance.new("TextLabel")
+local FlySpeedPlusBtn = Instance.new("TextButton")
+
 ScreenGui.Name = "SimpleFishGUI"
 ScreenGui.Parent = game.CoreGui
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- MainFrame diperbesar sedikit untuk menampung pilihan rod
+-- MainFrame diperbesar tingginya menjadi 405px agar muat untuk semua fitur
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-MainFrame.Position = UDim2.new(0.5, -75, 0.5, -137)
-MainFrame.Size = UDim2.new(0, 150, 0, 275) -- Ditambah 50px tingginya
+MainFrame.Position = UDim2.new(0.5, -75, 0.5, -202)
+MainFrame.Size = UDim2.new(0, 150, 0, 405)
 MainFrame.Active = true
 MainFrame.Draggable = true
 UICornerFrame.CornerRadius = UDim.new(0, 8)
@@ -121,7 +140,6 @@ FishCountLabel.TextColor3 = Color3.fromRGB(255, 255, 150)
 FishCountLabel.TextSize = 11
 
 -- === PILIHAN ROD ===
--- Label judul
 RodLabel.Name = "RodLabel"
 RodLabel.Parent = MainFrame
 RodLabel.BackgroundTransparency = 1
@@ -133,7 +151,6 @@ RodLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 RodLabel.TextSize = 10
 RodLabel.TextXAlignment = Enum.TextXAlignment.Left
 
--- Tombol panah kiri ( < )
 RodPrevButton.Name = "RodPrevButton"
 RodPrevButton.Parent = MainFrame
 RodPrevButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
@@ -147,7 +164,6 @@ local PrevCorner = Instance.new("UICorner")
 PrevCorner.CornerRadius = UDim.new(0, 4)
 PrevCorner.Parent = RodPrevButton
 
--- Label nama rod yang dipilih
 RodNameLabel.Name = "RodNameLabel"
 RodNameLabel.Parent = MainFrame
 RodNameLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
@@ -162,7 +178,6 @@ local RodNameCorner = Instance.new("UICorner")
 RodNameCorner.CornerRadius = UDim.new(0, 4)
 RodNameCorner.Parent = RodNameLabel
 
--- Tombol panah kanan ( > )
 RodNextButton.Name = "RodNextButton"
 RodNextButton.Parent = MainFrame
 RodNextButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
@@ -176,12 +191,10 @@ local NextCorner = Instance.new("UICorner")
 NextCorner.CornerRadius = UDim.new(0, 4)
 NextCorner.Parent = RodNextButton
 
--- Fungsi update tampilan nama rod
 local function UpdateRodDisplay()
     RodNameLabel.Text = SUPPORTED_RODS[selectedRodIndex]
 end
 
--- Klik < untuk rod sebelumnya
 RodPrevButton.MouseButton1Click:Connect(function()
     selectedRodIndex = selectedRodIndex - 1
     if selectedRodIndex < 1 then
@@ -190,7 +203,6 @@ RodPrevButton.MouseButton1Click:Connect(function()
     UpdateRodDisplay()
 end)
 
--- Klik > untuk rod berikutnya
 RodNextButton.MouseButton1Click:Connect(function()
     selectedRodIndex = selectedRodIndex + 1
     if selectedRodIndex > #SUPPORTED_RODS then
@@ -239,6 +251,70 @@ local SellNowCorner = Instance.new("UICorner")
 SellNowCorner.CornerRadius = UDim.new(0, 6)
 SellNowCorner.Parent = SellButton
 
+-- === BAGIAN MENU FLY DALAM SATU KOTAK ===
+FlySeparator.Name = "FlySeparator"
+FlySeparator.Parent = MainFrame
+FlySeparator.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+FlySeparator.BorderSizePixel = 0
+FlySeparator.Position = UDim2.new(0, 10, 0, 275)
+FlySeparator.Size = UDim2.new(0, 130, 0, 1)
+
+FlyToggleButton.Name = "FlyToggleButton"
+FlyToggleButton.Parent = MainFrame
+FlyToggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+FlyToggleButton.Position = UDim2.new(0, 10, 0, 285)
+FlyToggleButton.Size = UDim2.new(0, 130, 0, 28)
+FlyToggleButton.Font = Enum.Font.GothamBold
+FlyToggleButton.Text = "Terbang: OFF"
+FlyToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+FlyToggleButton.TextSize = 11
+local FlyBtnCorner = Instance.new("UICorner")
+FlyBtnCorner.CornerRadius = UDim.new(0, 6)
+FlyBtnCorner.Parent = FlyToggleButton
+
+-- Tombol Pengatur Kecepatan (- Speed +)
+FlySpeedMinusBtn.Name = "FlySpeedMinusBtn"
+FlySpeedMinusBtn.Parent = MainFrame
+FlySpeedMinusBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+FlySpeedMinusBtn.Position = UDim2.new(0, 10, 0, 323)
+FlySpeedMinusBtn.Size = UDim2.new(0, 28, 0, 25)
+FlySpeedMinusBtn.Font = Enum.Font.GothamBold
+FlySpeedMinusBtn.Text = "-"
+FlySpeedMinusBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+FlySpeedMinusBtn.TextSize = 12
+local MinusCorner = Instance.new("UICorner")
+MinusCorner.CornerRadius = UDim.new(0, 4)
+MinusCorner.Parent = FlySpeedMinusBtn
+
+FlySpeedLabel.Name = "FlySpeedLabel"
+FlySpeedLabel.Parent = MainFrame
+FlySpeedLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+FlySpeedLabel.Position = UDim2.new(0, 43, 0, 323)
+FlySpeedLabel.Size = UDim2.new(0, 64, 0, 25)
+FlySpeedLabel.Font = Enum.Font.GothamBold
+FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
+FlySpeedLabel.TextColor3 = Color3.fromRGB(100, 220, 255)
+FlySpeedLabel.TextSize = 10
+FlySpeedLabel.TextScaled = true
+local SpeedLblCorner = Instance.new("UICorner")
+SpeedLblCorner.CornerRadius = UDim.new(0, 4)
+SpeedLblCorner.Parent = FlySpeedLabel
+
+FlySpeedPlusBtn.Name = "FlySpeedPlusBtn"
+FlySpeedPlusBtn.Parent = MainFrame
+FlySpeedPlusBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+FlySpeedPlusBtn.Position = UDim2.new(0, 112, 0, 323)
+FlySpeedPlusBtn.Size = UDim2.new(0, 28, 0, 25)
+FlySpeedPlusBtn.Font = Enum.Font.GothamBold
+FlySpeedPlusBtn.Text = "+"
+FlySpeedPlusBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+FlySpeedPlusBtn.TextSize = 12
+local PlusCorner = Instance.new("UICorner")
+PlusCorner.CornerRadius = UDim.new(0, 4)
+PlusCorner.Parent = FlySpeedPlusBtn
+-- ==========================================
+
+-- Tombol Aksi Point Mancing & Jual
 SetFishPointButton.MouseButton1Click:Connect(function()
     local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -349,9 +425,90 @@ ExitButton.MouseButton1Click:Connect(function()
         antiAfkConnection:Disconnect()
         antiAfkConnection = nil
     end
+    if isFlying then
+        isFlying = false
+        if flyBodyVelocity then flyBodyVelocity:Destroy() end
+        if flyBodyGyro then flyBodyGyro:Destroy() end
+        if flyConnection then flyConnection:Disconnect() end
+    end
     ScreenGui:Destroy()
 end)
 
+-- Logika Terbang (Fly)
+local function startFlying()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not rootPart or not humanoid then return end
+    isFlying = true
+    FlyToggleButton.Text = "Terbang: ON"
+    FlyToggleButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    humanoid.PlatformStand = true
+    flyBodyVelocity = Instance.new("BodyVelocity")
+    flyBodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    flyBodyVelocity.Parent = rootPart
+    flyBodyGyro = Instance.new("BodyGyro")
+    flyBodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    flyBodyGyro.P = 15000
+    flyBodyGyro.CFrame = Camera.CFrame
+    flyBodyGyro.Parent = rootPart
+    
+    flyConnection = RunService.RenderStepped:Connect(function()
+        if not isFlying or not character.Parent then return end
+        local direction = Vector3.new(0, 0, 0)
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction = direction + Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction = direction - Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction = direction - Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction = direction + Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.E) then direction = direction + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then direction = direction - Vector3.new(0, 1, 0) end
+        if direction.Magnitude > 0 then direction = direction.Unit end
+        flyBodyVelocity.Velocity = direction * actualFlySpeed
+        flyBodyGyro.CFrame = Camera.CFrame
+    end)
+end
+
+local function stopFlying()
+    isFlying = false
+    FlyToggleButton.Text = "Terbang: OFF"
+    FlyToggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+    if flyBodyVelocity then flyBodyVelocity:Destroy() end
+    if flyBodyGyro then flyBodyGyro:Destroy() end
+    if flyConnection then flyConnection:Disconnect() end
+    local character = LocalPlayer.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid.PlatformStand = false end
+    end
+end
+
+FlyToggleButton.MouseButton1Click:Connect(function()
+    if isFlying then stopFlying() else startFlying() end
+end)
+
+FlySpeedPlusBtn.MouseButton1Click:Connect(function()
+    if flySpeedLevel < 10 then
+        flySpeedLevel = flySpeedLevel + 1
+        FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
+        actualFlySpeed = flySpeedLevel * flySpeedMultiplier
+    end
+end)
+
+FlySpeedMinusBtn.MouseButton1Click:Connect(function()
+    if flySpeedLevel > 1 then
+        flySpeedLevel = flySpeedLevel - 1
+        FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
+        actualFlySpeed = flySpeedLevel * flySpeedMultiplier
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    if isFlying then stopFlying() end
+end)
+
+-- Loop Utama Mancing
 task.spawn(function()
     while ScreenGui.Parent ~= nil do
         task.wait(1)
@@ -375,7 +532,6 @@ task.spawn(function()
             end
 
             local character = LocalPlayer.Character
-            -- Gunakan rod yang dipilih user
             local selectedRodName = SUPPORTED_RODS[selectedRodIndex]
             local rod = character and character:FindFirstChild(selectedRodName)
             local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -396,181 +552,4 @@ task.spawn(function()
             end
         end
     end
-end)
-
--- ==========================================
--- FLY SCRIPT
--- ==========================================
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local player = LocalPlayer
-local camera = workspace.CurrentCamera
-
-local isFlying = false
-local speedLevel = 5
-local speedMultiplier = 15
-local actualFlySpeed = speedLevel * speedMultiplier
-
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FlyMenuGui"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = player:WaitForChild("PlayerGui")
-
-local openMenuBtn = Instance.new("TextButton")
-openMenuBtn.Size = UDim2.new(0, 50, 0, 50)
-openMenuBtn.Position = UDim2.new(0, 20, 0, 150)
-openMenuBtn.Text = "✈️"
-openMenuBtn.TextSize = 20
-openMenuBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-openMenuBtn.Visible = false
-openMenuBtn.Parent = screenGui
-local openCorner = Instance.new("UICorner")
-openCorner.CornerRadius = UDim.new(0, 10)
-openCorner.Parent = openMenuBtn
-
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 160)
-mainFrame.Position = UDim2.new(0, 20, 0, 150)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-mainFrame.BorderSizePixel = 0
-mainFrame.Parent = screenGui
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 10)
-corner.Parent = mainFrame
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 30, 0, 30)
-closeBtn.Position = UDim2.new(1, -35, 0, 5)
-closeBtn.Text = "X"
-closeBtn.TextColor3 = Color3.fromRGB(255, 70, 70)
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 16
-closeBtn.BackgroundTransparency = 1
-closeBtn.Parent = mainFrame
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 35)
-title.Text = "✈️ CONTROL PANEL"
-title.TextColor3 = Color3.new(1, 1, 1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.BackgroundTransparency = 1
-title.Parent = mainFrame
-
-local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.new(0.8, 0, 0, 40)
-toggleButton.Position = UDim2.new(0.1, 0, 0.25, 0)
-toggleButton.Text = "Terbang: OFF"
-toggleButton.Font = Enum.Font.GothamBold
-toggleButton.TextSize = 14
-toggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
-toggleButton.TextColor3 = Color3.new(1, 1, 1)
-toggleButton.Parent = mainFrame
-local btnCorner = Instance.new("UICorner")
-btnCorner.CornerRadius = UDim.new(0, 6)
-btnCorner.Parent = toggleButton
-
-local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(0.8, 0, 0, 20)
-speedLabel.Position = UDim2.new(0.1, 0, 0.55, 0)
-speedLabel.Text = "Kecepatan (1 - 10):"
-speedLabel.TextColor3 = Color3.new(0.8, 0.8, 0.8)
-speedLabel.Font = Enum.Font.Gotham
-speedLabel.TextSize = 12
-speedLabel.BackgroundTransparency = 1
-speedLabel.TextXAlignment = Enum.TextXAlignment.Left
-speedLabel.Parent = mainFrame
-
-local speedInput = Instance.new("TextBox")
-speedInput.Size = UDim2.new(0.8, 0, 0, 35)
-speedInput.Position = UDim2.new(0.1, 0, 0.7, 0)
-speedInput.Text = tostring(speedLevel)
-speedInput.Font = Enum.Font.GothamBold
-speedInput.TextSize = 14
-speedInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-speedInput.TextColor3 = Color3.new(1, 1, 1)
-speedInput.Parent = mainFrame
-local inputCorner = Instance.new("UICorner")
-inputCorner.CornerRadius = UDim.new(0, 6)
-inputCorner.Parent = speedInput
-
-local bodyVelocity
-local bodyGyro
-local flyConnection
-
-local function startFlying()
-    local character = player.Character
-    if not character then return end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not rootPart or not humanoid then return end
-    isFlying = true
-    toggleButton.Text = "Terbang: ON"
-    toggleButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-    humanoid.PlatformStand = true
-    bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    bodyVelocity.Parent = rootPart
-    bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    bodyGyro.P = 15000
-    bodyGyro.CFrame = camera.CFrame
-    bodyGyro.Parent = rootPart
-    flyConnection = RunService.RenderStepped:Connect(function()
-        if not isFlying or not character.Parent then return end
-        local direction = Vector3.new(0, 0, 0)
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction = direction + camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction = direction - camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction = direction - camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction = direction + camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.E) then direction = direction + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then direction = direction - Vector3.new(0, 1, 0) end
-        if direction.Magnitude > 0 then direction = direction.Unit end
-        bodyVelocity.Velocity = direction * actualFlySpeed
-        bodyGyro.CFrame = camera.CFrame
-    end)
-end
-
-local function stopFlying()
-    isFlying = false
-    toggleButton.Text = "Terbang: OFF"
-    toggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
-    if bodyVelocity then bodyVelocity:Destroy() end
-    if bodyGyro then bodyGyro:Destroy() end
-    if flyConnection then flyConnection:Disconnect() end
-    local character = player.Character
-    if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid.PlatformStand = false end
-    end
-end
-
-toggleButton.MouseButton1Click:Connect(function()
-    if isFlying then stopFlying() else startFlying() end
-end)
-
-speedInput.FocusLost:Connect(function()
-    local inputNumber = tonumber(speedInput.Text)
-    if inputNumber then
-        speedLevel = math.clamp(math.floor(inputNumber), 1, 10)
-        speedInput.Text = tostring(speedLevel)
-        actualFlySpeed = speedLevel * speedMultiplier
-    else
-        speedInput.Text = tostring(speedLevel)
-    end
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-    mainFrame.Visible = false
-    openMenuBtn.Visible = true
-end)
-
-openMenuBtn.MouseButton1Click:Connect(function()
-    mainFrame.Visible = true
-    openMenuBtn.Visible = false
-end)
-
-player.CharacterAdded:Connect(function()
-    if isFlying then stopFlying() end
 end)
