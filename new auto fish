@@ -12,7 +12,6 @@ local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local Camera = workspace.CurrentCamera
 
--- MENGUBAH KAPASITAS MAKSIMAL IKAN MENJADI 200
 local MaxFishCapacity = 200
 
 local isRunning = false
@@ -31,7 +30,6 @@ local flyBodyVelocity = nil
 local flyBodyGyro = nil
 local flyConnection = nil
 
--- Daftar rod & index yang dipilih
 local SUPPORTED_RODS = {
     "ZombieRod",
     "AngelRod",
@@ -41,7 +39,7 @@ local SUPPORTED_RODS = {
 local selectedRodIndex = 1
 
 -- ==========================================
--- GABUNGAN GUI UTAMA (MANCING & TERBANG)
+-- GABUNGAN GUI UTAMA
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -55,13 +53,11 @@ local SellButton = Instance.new("TextButton")
 local ExitButton = Instance.new("TextButton")
 local UICornerFrame = Instance.new("UICorner")
 
--- Tombol pilih rod
 local RodLabel = Instance.new("TextLabel")
 local RodPrevButton = Instance.new("TextButton")
 local RodNextButton = Instance.new("TextButton")
 local RodNameLabel = Instance.new("TextLabel")
 
--- Komponen Fly
 local FlySeparator = Instance.new("Frame")
 local FlyToggleButton = Instance.new("TextButton")
 local FlySpeedMinusBtn = Instance.new("TextButton")
@@ -334,59 +330,23 @@ SetSellPointButton.Activated:Connect(function()
 end)
 
 -- ==========================================
--- SISTEM GUI HOLD (DIKOREKSI UNTUK HP MOBILE)
+-- SISTEM HOLD KOORDINAT TETAP (SELL ALL)
 -- ==========================================
-local function HoldSellAllButton()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then return end
-    
-    local foundButton = nil
-    
-    -- Mencari tombol "Sell All" dengan lebih teliti (termasuk di dalam ImageButton)
-    for _, gui in ipairs(playerGui:GetDescendants()) do
-        if gui:IsA("TextButton") or gui:IsA("ImageButton") then
-            local text = ""
-            if gui:IsA("TextButton") then
-                text = string.lower(gui.Text)
-            else
-                local label = gui:FindFirstChildWhichIsA("TextLabel")
-                if label then
-                    text = string.lower(label.Text)
-                end
-            end
-            
-            if text:find("sell all") or text:find("jual") then
-                foundButton = gui
-                break
-            end
-        end
-    end
-
-    if foundButton then
-        pcall(function()
-            -- 1. Metode Pertama: Paksa Eksekusi Event (Paling ampuh jika disupport executor)
-            if getconnections then
-                for _, connection in pairs(getconnections(foundButton.MouseButton1Down)) do connection:Fire() end
-                task.wait(1.5)
-                for _, connection in pairs(getconnections(foundButton.MouseButton1Up)) do connection:Fire() end
-                for _, connection in pairs(getconnections(foundButton.Activated)) do connection:Fire() end
-                for _, connection in pairs(getconnections(foundButton.MouseButton1Click)) do connection:Fire() end
-            end
-            
-            -- 2. Metode Kedua: Simulasi Sentuhan Layar dengan Perhitungan Notch Layar HP
-            local inset = GuiService:GetGuiInset()
-            local absPos = foundButton.AbsolutePosition
-            local absSize = foundButton.AbsoluteSize
-            
-            -- Menghitung titik sentuh presisi (Menambahkan nilai Inset Layar HP)
-            local clickX = absPos.X + (absSize.X / 2)
-            local clickY = (absPos.Y + inset.Y) + (absSize.Y / 2)
-            
-            VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
-            task.wait(1.5) -- Waktu Hold/Tahan layar
-            VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
-        end)
-    end
+local function HoldFixedSellAll()
+    pcall(function()
+        local camera = workspace.CurrentCamera
+        local viewportSize = camera.ViewportSize
+        
+        -- Berdasarkan gambar, posisi tombol "Sell All" berada di tengah agak ke kiri bawah dari kotak opsi.
+        -- Kita arahkan titik sentuhnya tepat ke tengah layar, sedikit digeser ke kiri.
+        local targetX = (viewportSize.X / 2) - 85
+        local targetY = (viewportSize.Y / 2) + 15
+        
+        -- Simulasi Menahan (Hold) Layar menggunakan VirtualInputManager
+        VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, true, game, 1)
+        task.wait(2.0) -- Tahan selama 2 detik penuh agar sistem game mendeteksinya sebagai "Hold"
+        VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, false, game, 1)
+    end)
 end
 
 local function GoAndSell()
@@ -397,11 +357,11 @@ local function GoAndSell()
     if rootPart then
         local returnPos = savedFishPosition or rootPart.CFrame
         
-        -- Teleport ke lokasi jual
+        -- 1. Teleport ke lokasi NPC Jual
         rootPart.CFrame = savedSellPosition
-        task.wait(2) -- Tunggu map/NPC termuat sempurna
+        task.wait(2)
         
-        -- Cari dan TAHAN ProximityPrompt (Kotak Hitam di NPC/Lokasi)
+        -- 2. Picu ProximityPrompt (Kotak Hitam) NPC secara otomatis
         for _, obj in pairs(workspace:GetDescendants()) do
             if obj:IsA("ProximityPrompt") then
                 local actionText = string.lower(obj.ActionText)
@@ -426,12 +386,14 @@ local function GoAndSell()
             end
         end
 
-        -- JEDA DIPERPANJANG: Menunggu GUI NPC di layar termuat seutuhnya
-        task.wait(2.5) 
-        HoldSellAllButton()
+        -- 3. Tunggu hingga UI pilihan "Sell All" muncul di layar
+        task.wait(2.0)
+        
+        -- 4. Jalankan Tahanan (Hold) pada tombol Sell All yang posisinya tetap di layar
+        HoldFixedSellAll()
         task.wait(1.0)
         
-        -- Kembali ke titik awal memancing
+        -- 5. Kembali ke tempat mancing semula
         rootPart.CFrame = returnPos
     end
 end
