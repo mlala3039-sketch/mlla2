@@ -1,0 +1,73 @@
+local function ClickSellAllButton()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return end
+    
+    for _, gui in ipairs(playerGui:GetDescendants()) do
+        if (gui:IsA("TextButton") or gui:IsA("ImageButton")) and (gui.Name:lower():find("sell") or (gui:IsA("TextButton") and gui.Text:lower():find("sell all"))) then
+            
+            -- Cara 1: Menggunakan firesignal (Sangat optimal untuk executor Mobile)
+            if firesignal then
+                firesignal(gui.MouseButton1Click)
+                firesignal(gui.Activated)
+            else
+                -- Cara 2: Fallback jika firesignal tidak didukung (hapus offset +36 PC)
+                local absPos = gui.AbsolutePosition
+                local absSize = gui.AbsoluteSize
+                local clickX = absPos.X + (absSize.X / 2)
+                local clickY = absPos.Y + (absSize.Y / 2) -- Dihapus +36 nya agar akurat di HP
+                VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
+                task.wait(0.1)
+                VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
+            end
+            break
+        end
+    end
+end
+
+local function GoAndSell()
+    if not savedSellPosition then return end
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
+    
+    if rootPart then
+        local returnPos = savedFishPosition or rootPart.CFrame
+        rootPart.CFrame = savedSellPosition
+        
+        -- Beri waktu sedikit lebih lama agar map dan NPC memuat di HP
+        task.wait(1.5) 
+
+        -- Metode Mobile: Mencari ProximityPrompt di dekat pemain (Pengganti tekan E)
+        local promptFound = false
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") and obj.Parent and obj.Parent:IsA("BasePart") then
+                local distance = (obj.Parent.Position - rootPart.Position).Magnitude
+                if distance < 20 then -- Jika prompt/NPC ada di radius 20 stud
+                    if fireproximityprompt then
+                        fireproximityprompt(obj, 1)
+                    else
+                        -- Alternatif jika fireproximityprompt tidak ada
+                        obj:InputHoldBegin()
+                        task.wait(obj.HoldDuration + 0.1)
+                        obj:InputHoldEnd()
+                    end
+                    promptFound = true
+                    break
+                end
+            end
+        end
+
+        -- Jika tidak menemukan ProximityPrompt, baru gunakan VIM (E Key) sebagai cadangan
+        if not promptFound then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(1) -- Diturunkan dari 5 detik menjadi 1 detik agar tidak terlalu lama
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        end
+        
+        task.wait(1.5) -- Tunggu GUI Jual (Sell Menu) Muncul di layar
+        ClickSellAllButton()
+        task.wait(1.0)
+        
+        -- Kembali ke tempat mancing
+        rootPart.CFrame = returnPos
+    end
+end
