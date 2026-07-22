@@ -9,6 +9,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local VirtualUser = game:GetService("VirtualUser")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 local Camera = workspace.CurrentCamera
 
 -- MENGUBAH KAPASITAS MAKSIMAL IKAN MENJADI 200
@@ -60,7 +61,7 @@ local RodPrevButton = Instance.new("TextButton")
 local RodNextButton = Instance.new("TextButton")
 local RodNameLabel = Instance.new("TextLabel")
 
--- Komponen Fly di dalam UI Utama
+-- Komponen Fly
 local FlySeparator = Instance.new("Frame")
 local FlyToggleButton = Instance.new("TextButton")
 local FlySpeedMinusBtn = Instance.new("TextButton")
@@ -198,17 +199,13 @@ end
 
 RodPrevButton.Activated:Connect(function()
     selectedRodIndex = selectedRodIndex - 1
-    if selectedRodIndex < 1 then
-        selectedRodIndex = #SUPPORTED_RODS
-    end
+    if selectedRodIndex < 1 then selectedRodIndex = #SUPPORTED_RODS end
     UpdateRodDisplay()
 end)
 
 RodNextButton.Activated:Connect(function()
     selectedRodIndex = selectedRodIndex + 1
-    if selectedRodIndex > #SUPPORTED_RODS then
-        selectedRodIndex = 1
-    end
+    if selectedRodIndex > #SUPPORTED_RODS then selectedRodIndex = 1 end
     UpdateRodDisplay()
 end)
 -- === AKHIR PILIHAN ROD ===
@@ -252,7 +249,7 @@ local SellNowCorner = Instance.new("UICorner")
 SellNowCorner.CornerRadius = UDim.new(0, 6)
 SellNowCorner.Parent = SellButton
 
--- === BAGIAN MENU FLY DALAM SATU KOTAK ===
+-- === BAGIAN MENU FLY ===
 FlySeparator.Name = "FlySeparator"
 FlySeparator.Parent = MainFrame
 FlySeparator.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
@@ -337,49 +334,58 @@ SetSellPointButton.Activated:Connect(function()
 end)
 
 -- ==========================================
--- SISTEM GUI HOLD (TOMBOL SELL ALL)
+-- SISTEM GUI HOLD (DIKOREKSI UNTUK HP MOBILE)
 -- ==========================================
 local function HoldSellAllButton()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return end
     
+    local foundButton = nil
+    
+    -- Mencari tombol "Sell All" dengan lebih teliti (termasuk di dalam ImageButton)
     for _, gui in ipairs(playerGui:GetDescendants()) do
         if gui:IsA("TextButton") or gui:IsA("ImageButton") then
-            -- Mencari nama Text/Button dari GUI
-            local text = string.lower(gui.Name)
+            local text = ""
             if gui:IsA("TextButton") then
-                text = text .. " " .. string.lower(gui.Text)
+                text = string.lower(gui.Text)
+            else
+                local label = gui:FindFirstChildWhichIsA("TextLabel")
+                if label then
+                    text = string.lower(label.Text)
+                end
             end
             
             if text:find("sell all") or text:find("jual") then
-                pcall(function()
-                    -- Simulasi Tahan Bawaan Executor (Mouse Down -> Wait -> Mouse Up)
-                    if getconnections then
-                        for _, connection in pairs(getconnections(gui.MouseButton1Down)) do
-                            connection:Fire()
-                        end
-                        task.wait(1.5) -- Tahan selama 1.5 detik
-                        for _, connection in pairs(getconnections(gui.MouseButton1Up)) do
-                            connection:Fire()
-                        end
-                        for _, connection in pairs(getconnections(gui.Activated)) do
-                            connection:Fire()
-                        end
-                    end
-                    
-                    -- Backup Simulasi Layar (Virtual Input) jika event di atas tidak mempan
-                    local absPos = gui.AbsolutePosition
-                    local absSize = gui.AbsoluteSize
-                    local clickX = absPos.X + (absSize.X / 2)
-                    local clickY = absPos.Y + (absSize.Y / 2) + 36 
-                    
-                    VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
-                    task.wait(1.5) -- Waktu Hold Layar
-                    VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
-                end)
+                foundButton = gui
                 break
             end
         end
+    end
+
+    if foundButton then
+        pcall(function()
+            -- 1. Metode Pertama: Paksa Eksekusi Event (Paling ampuh jika disupport executor)
+            if getconnections then
+                for _, connection in pairs(getconnections(foundButton.MouseButton1Down)) do connection:Fire() end
+                task.wait(1.5)
+                for _, connection in pairs(getconnections(foundButton.MouseButton1Up)) do connection:Fire() end
+                for _, connection in pairs(getconnections(foundButton.Activated)) do connection:Fire() end
+                for _, connection in pairs(getconnections(foundButton.MouseButton1Click)) do connection:Fire() end
+            end
+            
+            -- 2. Metode Kedua: Simulasi Sentuhan Layar dengan Perhitungan Notch Layar HP
+            local inset = GuiService:GetGuiInset()
+            local absPos = foundButton.AbsolutePosition
+            local absSize = foundButton.AbsoluteSize
+            
+            -- Menghitung titik sentuh presisi (Menambahkan nilai Inset Layar HP)
+            local clickX = absPos.X + (absSize.X / 2)
+            local clickY = (absPos.Y + inset.Y) + (absSize.Y / 2)
+            
+            VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
+            task.wait(1.5) -- Waktu Hold/Tahan layar
+            VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
+        end)
     end
 end
 
@@ -406,7 +412,6 @@ local function GoAndSell()
                     if part and part:IsA("BasePart") then
                         local distance = (part.Position - rootPart.Position).Magnitude
                         if distance <= (obj.MaxActivationDistance + 10) then
-                            
                             if fireproximityprompt then
                                 fireproximityprompt(obj, 1)
                             else
@@ -421,8 +426,8 @@ local function GoAndSell()
             end
         end
 
-        -- Hold tombol GUI "Sell All" di layar yang muncul dari NPC
-        task.wait(1.5)
+        -- JEDA DIPERPANJANG: Menunggu GUI NPC di layar termuat seutuhnya
+        task.wait(2.5) 
         HoldSellAllButton()
         task.wait(1.0)
         
@@ -480,23 +485,13 @@ end)
 ExitButton.Activated:Connect(function()
     isRunning = false
     isAntiAfkOn = false
-    if antiAfkConnection then
-        antiAfkConnection:Disconnect()
-        antiAfkConnection = nil
-    end
-    if isFlying then
-        isFlying = false
-        if flyBodyVelocity then flyBodyVelocity:Destroy() end
-        if flyBodyGyro then flyBodyGyro:Destroy() end
-        if flyConnection then flyConnection:Disconnect() end
-    end
-    if ScreenGui then
-        ScreenGui:Destroy()
-    end
+    if antiAfkConnection then antiAfkConnection:Disconnect() antiAfkConnection = nil end
+    if isFlying then stopFlying() end
+    if ScreenGui then ScreenGui:Destroy() end
 end)
 
 -- Logika Terbang (Fly)
-local function startFlying()
+function startFlying()
     local character = LocalPlayer.Character
     if not character then return end
     local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -531,7 +526,7 @@ local function startFlying()
     end)
 end
 
-local function stopFlying()
+function stopFlying()
     isFlying = false
     FlyToggleButton.Text = "Terbang: OFF"
     FlyToggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
@@ -576,7 +571,6 @@ task.spawn(function()
         FishCountLabel.Text = "Fish: " .. currentFishCaught .. " / " .. MaxFishCapacity
         if isRunning then
             
-            -- Jika tas penuh, jalankan Auto Sell
             if savedSellPosition ~= nil and currentFishCaught >= MaxFishCapacity then
                 SellButton.Text = "Bag Full!"
                 GoAndSell()
@@ -584,13 +578,10 @@ task.spawn(function()
                 local character = LocalPlayer.Character
                 local rootPart = character and character:FindFirstChild("HumanoidRootPart")
                 
-                -- Tunggu jeda santai setelah jual sebelum lanjut mancing
                 for i = 5, 1, -1 do
                     if not isRunning or not ScreenGui.Parent then break end
                     SellButton.Text = "Waiting " .. i .. "s"
-                    if rootPart and savedFishPosition then
-                        rootPart.CFrame = savedFishPosition
-                    end
+                    if rootPart and savedFishPosition then rootPart.CFrame = savedFishPosition end
                     task.wait(1)
                 end
                 SellButton.Text = "Sell Now"
@@ -602,9 +593,7 @@ task.spawn(function()
             local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 
             if rod and rootPart then
-                if savedFishPosition then
-                    rootPart.CFrame = savedFishPosition
-                end
+                if savedFishPosition then rootPart.CFrame = savedFishPosition end
                 local targetPos = rootPart.CFrame * CFrame.new(0, 0, -50).Position
                 rod.CastToPosition:FireServer(targetPos)
                 task.wait(17)
