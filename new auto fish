@@ -70,6 +70,8 @@ local FlySpeedPlusBtn = Instance.new("TextButton")
 ScreenGui.Name = "SimpleFishGUI"
 ScreenGui.Parent = game.CoreGui
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+-- Agar GUI tidak ke-reset saat karakter mati
+ScreenGui.ResetOnSpawn = false 
 
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
@@ -195,7 +197,7 @@ local function UpdateRodDisplay()
     RodNameLabel.Text = SUPPORTED_RODS[selectedRodIndex]
 end
 
-RodPrevButton.MouseButton1Click:Connect(function()
+RodPrevButton.Activated:Connect(function()
     selectedRodIndex = selectedRodIndex - 1
     if selectedRodIndex < 1 then
         selectedRodIndex = #SUPPORTED_RODS
@@ -203,7 +205,7 @@ RodPrevButton.MouseButton1Click:Connect(function()
     UpdateRodDisplay()
 end)
 
-RodNextButton.MouseButton1Click:Connect(function()
+RodNextButton.Activated:Connect(function()
     selectedRodIndex = selectedRodIndex + 1
     if selectedRodIndex > #SUPPORTED_RODS then
         selectedRodIndex = 1
@@ -313,8 +315,8 @@ PlusCorner.CornerRadius = UDim.new(0, 4)
 PlusCorner.Parent = FlySpeedPlusBtn
 -- ==========================================
 
--- Tombol Aksi Point Mancing & Jual
-SetFishPointButton.MouseButton1Click:Connect(function()
+-- Mengganti semua event klik menjadi "Activated" agar 100% responsif di Mobile & PC
+SetFishPointButton.Activated:Connect(function()
     local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if rootPart then
@@ -325,7 +327,7 @@ SetFishPointButton.MouseButton1Click:Connect(function()
     end
 end)
 
-SetSellPointButton.MouseButton1Click:Connect(function()
+SetSellPointButton.Activated:Connect(function()
     local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if rootPart then
@@ -337,7 +339,7 @@ SetSellPointButton.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================
--- SISTEM AUTO SELL BARU (PROXIMITY PROMPT)
+-- SISTEM AUTO SELL GUI BERUBAH JADI HOLD
 -- ==========================================
 local function ClickSellAllButton()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -350,10 +352,13 @@ local function ClickSellAllButton()
                 pcall(function()
                     local absPos = gui.AbsolutePosition
                     local absSize = gui.AbsoluteSize
+                    -- Offset Y+36 untuk menutupi bar atas Roblox
                     local clickX = absPos.X + (absSize.X / 2)
-                    local clickY = absPos.Y + (absSize.Y / 2) + 36
+                    local clickY = absPos.Y + (absSize.Y / 2) + 36 
+                    
+                    -- Simulasi TAHAN (Hold) layar di area tombol GUI tersebut
                     VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
-                    task.wait(0.1)
+                    task.wait(2.0) -- Menahan selama 2 detik
                     VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
                 end)
                 break
@@ -401,7 +406,7 @@ local function GoAndSell()
             end
         end
 
-        -- Klik tombol konfirmasi tambahan di layar jika ada (Sell All / Confirm)
+        -- Hold tombol konfirmasi tambahan di layar jika ada (Sell All / Confirm)
         task.wait(1.5)
         ClickSellAllButton()
         task.wait(1.0)
@@ -412,7 +417,7 @@ local function GoAndSell()
 end
 -- ==========================================
 
-SellButton.MouseButton1Click:Connect(function()
+SellButton.Activated:Connect(function()
     if savedSellPosition then
         SellButton.Text = "Selling..."
         GoAndSell()
@@ -425,7 +430,7 @@ SellButton.MouseButton1Click:Connect(function()
     end
 end)
 
-ToggleButton.MouseButton1Click:Connect(function()
+ToggleButton.Activated:Connect(function()
     isRunning = not isRunning
     if isRunning then
         ToggleButton.Text = "Auto Fish: ON"
@@ -436,7 +441,7 @@ ToggleButton.MouseButton1Click:Connect(function()
     end
 end)
 
-AntiAfkButton.MouseButton1Click:Connect(function()
+AntiAfkButton.Activated:Connect(function()
     isAntiAfkOn = not isAntiAfkOn
     if isAntiAfkOn then
         AntiAfkButton.Text = "Anti-AFK: ON"
@@ -457,7 +462,7 @@ AntiAfkButton.MouseButton1Click:Connect(function()
     end
 end)
 
-ExitButton.MouseButton1Click:Connect(function()
+ExitButton.Activated:Connect(function()
     isRunning = false
     isAntiAfkOn = false
     if antiAfkConnection then
@@ -470,7 +475,10 @@ ExitButton.MouseButton1Click:Connect(function()
         if flyBodyGyro then flyBodyGyro:Destroy() end
         if flyConnection then flyConnection:Disconnect() end
     end
-    ScreenGui:Destroy()
+    -- Reset GUI
+    if ScreenGui then
+        ScreenGui:Destroy()
+    end
 end)
 
 -- Logika Terbang (Fly)
@@ -523,11 +531,11 @@ local function stopFlying()
     end
 end
 
-FlyToggleButton.MouseButton1Click:Connect(function()
+FlyToggleButton.Activated:Connect(function()
     if isFlying then stopFlying() else startFlying() end
 end)
 
-FlySpeedPlusBtn.MouseButton1Click:Connect(function()
+FlySpeedPlusBtn.Activated:Connect(function()
     if flySpeedLevel < 10 then
         flySpeedLevel = flySpeedLevel + 1
         FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
@@ -535,7 +543,7 @@ FlySpeedPlusBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-FlySpeedMinusBtn.MouseButton1Click:Connect(function()
+FlySpeedMinusBtn.Activated:Connect(function()
     if flySpeedLevel > 1 then
         flySpeedLevel = flySpeedLevel - 1
         FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
@@ -549,7 +557,7 @@ end)
 
 -- Loop Utama Mancing
 task.spawn(function()
-    while ScreenGui.Parent ~= nil do
+    while ScreenGui and ScreenGui.Parent ~= nil do
         task.wait(1)
         FishCountLabel.Text = "Fish: " .. currentFishCaught .. " / " .. MaxFishCapacity
         if isRunning then
@@ -564,7 +572,7 @@ task.spawn(function()
                 
                 -- Tunggu jeda santai setelah jual sebelum lanjut mancing
                 for i = 5, 1, -1 do
-                    if not isRunning then break end
+                    if not isRunning or not ScreenGui.Parent then break end
                     SellButton.Text = "Waiting " .. i .. "s"
                     if rootPart and savedFishPosition then
                         rootPart.CFrame = savedFishPosition
