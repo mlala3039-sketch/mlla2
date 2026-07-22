@@ -70,7 +70,6 @@ local FlySpeedPlusBtn = Instance.new("TextButton")
 ScreenGui.Name = "SimpleFishGUI"
 ScreenGui.Parent = game.CoreGui
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
--- Agar GUI tidak ke-reset saat karakter mati
 ScreenGui.ResetOnSpawn = false 
 
 MainFrame.Name = "MainFrame"
@@ -315,7 +314,6 @@ PlusCorner.CornerRadius = UDim.new(0, 4)
 PlusCorner.Parent = FlySpeedPlusBtn
 -- ==========================================
 
--- Mengganti semua event klik menjadi "Activated" agar 100% responsif di Mobile & PC
 SetFishPointButton.Activated:Connect(function()
     local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -339,26 +337,44 @@ SetSellPointButton.Activated:Connect(function()
 end)
 
 -- ==========================================
--- SISTEM AUTO SELL GUI BERUBAH JADI HOLD
+-- SISTEM GUI HOLD (TOMBOL SELL ALL)
 -- ==========================================
-local function ClickSellAllButton()
+local function HoldSellAllButton()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return end
     
     for _, gui in ipairs(playerGui:GetDescendants()) do
         if gui:IsA("TextButton") or gui:IsA("ImageButton") then
-            local text = string.lower(gui.Name .. (gui:IsA("TextButton") and gui.Text or ""))
-            if text:find("sell") or text:find("jual") or text:find("confirm") or text:find("sell all") then
+            -- Mencari nama Text/Button dari GUI
+            local text = string.lower(gui.Name)
+            if gui:IsA("TextButton") then
+                text = text .. " " .. string.lower(gui.Text)
+            end
+            
+            if text:find("sell all") or text:find("jual") then
                 pcall(function()
+                    -- Simulasi Tahan Bawaan Executor (Mouse Down -> Wait -> Mouse Up)
+                    if getconnections then
+                        for _, connection in pairs(getconnections(gui.MouseButton1Down)) do
+                            connection:Fire()
+                        end
+                        task.wait(1.5) -- Tahan selama 1.5 detik
+                        for _, connection in pairs(getconnections(gui.MouseButton1Up)) do
+                            connection:Fire()
+                        end
+                        for _, connection in pairs(getconnections(gui.Activated)) do
+                            connection:Fire()
+                        end
+                    end
+                    
+                    -- Backup Simulasi Layar (Virtual Input) jika event di atas tidak mempan
                     local absPos = gui.AbsolutePosition
                     local absSize = gui.AbsoluteSize
-                    -- Offset Y+36 untuk menutupi bar atas Roblox
                     local clickX = absPos.X + (absSize.X / 2)
                     local clickY = absPos.Y + (absSize.Y / 2) + 36 
                     
-                    -- Simulasi TAHAN (Hold) layar di area tombol GUI tersebut
                     VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
-                    task.wait(2.0) -- Menahan selama 2 detik
+                    task.wait(1.5) -- Waktu Hold Layar
                     VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
                 end)
                 break
@@ -379,7 +395,7 @@ local function GoAndSell()
         rootPart.CFrame = savedSellPosition
         task.wait(2) -- Tunggu map/NPC termuat sempurna
         
-        -- Cari dan aktifkan ProximityPrompt (Kotak Hitam NPC)
+        -- Cari dan TAHAN ProximityPrompt (Kotak Hitam di NPC/Lokasi)
         for _, obj in pairs(workspace:GetDescendants()) do
             if obj:IsA("ProximityPrompt") then
                 local actionText = string.lower(obj.ActionText)
@@ -391,7 +407,6 @@ local function GoAndSell()
                         local distance = (part.Position - rootPart.Position).Magnitude
                         if distance <= (obj.MaxActivationDistance + 10) then
                             
-                            -- Simulasi Hold ProximityPrompt
                             if fireproximityprompt then
                                 fireproximityprompt(obj, 1)
                             else
@@ -406,9 +421,9 @@ local function GoAndSell()
             end
         end
 
-        -- Hold tombol konfirmasi tambahan di layar jika ada (Sell All / Confirm)
+        -- Hold tombol GUI "Sell All" di layar yang muncul dari NPC
         task.wait(1.5)
-        ClickSellAllButton()
+        HoldSellAllButton()
         task.wait(1.0)
         
         -- Kembali ke titik awal memancing
@@ -475,7 +490,6 @@ ExitButton.Activated:Connect(function()
         if flyBodyGyro then flyBodyGyro:Destroy() end
         if flyConnection then flyConnection:Disconnect() end
     end
-    -- Reset GUI
     if ScreenGui then
         ScreenGui:Destroy()
     end
