@@ -11,8 +11,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 
--- MENGUBAH KAPASITAS MAKSIMAL IKAN MENJADI 200
-local MaxFishCapacity = 200
+-- MENGUBAH KAPASITAS MAKSIMAL IKAN MENJADI 100
+local MaxFishCapacity = 100
 
 local isRunning = false
 local isAntiAfkOn = false
@@ -521,7 +521,8 @@ task.spawn(function()
                 currentFishCaught = 0
                 local character = LocalPlayer.Character
                 local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-                for i = 20, 1, -1 do
+                -- WAKTU TUNGGU SETELAH MENJUAL DIUBAH MENJADI 15 DETIK
+                for i = 15, 1, -1 do
                     if not isRunning then break end
                     SellButton.Text = "Waiting " .. i .. "s"
                     if rootPart and savedFishPosition then
