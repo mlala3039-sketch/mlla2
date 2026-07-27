@@ -11,8 +11,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 
--- MENGUBAH KAPASITAS MAKSIMAL IKAN MENJADI 100
-local MaxFishCapacity = 100
+-- MENGUBAH KAPASITAS MAKSIMAL IKAN MENJADI 200
+local MaxFishCapacity = 200
 
 local isRunning = false
 local isAntiAfkOn = false
@@ -36,7 +36,7 @@ local SUPPORTED_RODS = {
     "AngelRod",
     "DarkBladeRod",
     "ZeusRod",
-    "VIPRod", -- VIPRod ditambahkan ke sini
+    "VIPRod",
 }
 local selectedRodIndex = 1
 
