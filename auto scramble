@@ -1,0 +1,180 @@
+-- Menghapus GUI lama jika ada
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+
+if CoreGui:FindFirstChild("FastScramblerGUI") then
+    CoreGui.FastScramblerGUI:Destroy()
+end
+
+local player = game.Players.LocalPlayer
+local isRunning = false
+local configFile = "FastScramblerConfig.json"
+
+-- Fungsi Simpan Konfigurasi
+local function saveConfig()
+    if writefile then
+        local data = {
+            Enabled = isRunning
+        }
+        pcall(function()
+            writefile(configFile, HttpService:JSONEncode(data))
+        end)
+    end
+end
+
+-- Fungsi Muat Konfigurasi
+local function loadConfig()
+    if isfile and readfile and isfile(configFile) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(configFile))
+        end)
+        if success and type(result) == "table" then
+            return result
+        end
+    end
+    return nil
+end
+
+-- Membuat ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FastScramblerGUI"
+ScreenGui.ResetOnSpawn = false
+
+-- Pasang di CoreGui (agar aman dari deteksi) atau di PlayerGui
+local success = pcall(function()
+    ScreenGui.Parent = CoreGui
+end)
+if not success then
+    ScreenGui.Parent = player:WaitForChild("PlayerGui")
+end
+
+-- Frame Utama
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 200, 0, 150)
+MainFrame.Position = UDim2.new(0.5, -100, 0.5, -75)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- Judul
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.BackgroundTransparency = 1
+Title.Text = "⚡ Scrambler Auto"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.Parent = MainFrame
+
+-- Tombol On/Off
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0.8, 0, 0, 40)
+ToggleBtn.Position = UDim2.new(0.1, 0, 0.3, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50) -- Merah (OFF)
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Text = "Status: OFF"
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.TextSize = 14
+ToggleBtn.Parent = MainFrame
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 6)
+ToggleCorner.Parent = ToggleBtn
+
+-- Tombol Exit
+local ExitBtn = Instance.new("TextButton")
+ExitBtn.Size = UDim2.new(0.8, 0, 0, 30)
+ExitBtn.Position = UDim2.new(0.1, 0, 0.65, 0)
+ExitBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+ExitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ExitBtn.Text = "Exit"
+ExitBtn.Font = Enum.Font.Gotham
+ExitBtn.TextSize = 14
+ExitBtn.Parent = MainFrame
+
+local ExitCorner = Instance.new("UICorner")
+ExitCorner.CornerRadius = UDim.new(0, 6)
+ExitCorner.Parent = ExitBtn
+
+-- Fungsi Eksekusi (Equip + Click)
+local function startLoop()
+    task.spawn(function()
+        while isRunning do
+            local character = player.Character
+            local backpack = player:FindFirstChild("Backpack")
+            
+            if character then
+                local humanoid = character:FindFirstChildOfClass("Humanoid")
+                local tool = nil
+
+                -- 1. Cari item di karakter
+                for _, item in pairs(character:GetChildren()) do
+                    if item:IsA("Tool") and string.find(string.lower(item.Name), "scrambler") then
+                        tool = item
+                        break
+                    end
+                end
+
+                -- 2. Jika tidak ada, cari di Backpack
+                if not tool and backpack then
+                    for _, item in pairs(backpack:GetChildren()) do
+                        if item:IsA("Tool") and string.find(string.lower(item.Name), "scrambler") then
+                            tool = item
+                            break
+                        end
+                    end
+                end
+
+                -- 3. Eksekusi Equip & Activate
+                if tool and humanoid then
+                    if tool.Parent == backpack then
+                        humanoid:EquipTool(tool)
+                    end
+                    
+                    if tool.Parent == character then
+                        tool:Activate()
+                    end
+                end
+            end
+
+            task.wait(0.1) 
+        end
+    end)
+end
+
+-- Logika Tombol Toggle
+ToggleBtn.MouseButton1Click:Connect(function()
+    isRunning = not isRunning
+
+    if isRunning then
+        ToggleBtn.Text = "Status: ON"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        startLoop()
+    else
+        ToggleBtn.Text = "Status: OFF"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    end
+
+    saveConfig()
+end)
+
+-- Logika Tombol Exit
+ExitBtn.MouseButton1Click:Connect(function()
+    isRunning = false
+    ScreenGui:Destroy()
+end)
+
+-- Auto Load Konfigurasi Saat Pertama Kali Dijalankan
+local savedData = loadConfig()
+if savedData and savedData.Enabled then
+    isRunning = true
+    ToggleBtn.Text = "Status: ON"
+    ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    startLoop()
+end
