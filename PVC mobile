@@ -415,10 +415,14 @@ local function doAutoSellTask()
                 local absSize = gui.AbsoluteSize
                 local center = absPos + (absSize / 2)
                 
+                -- PENYESUAIAN TITIK KLIK (DIGESER LEBIH KE KANAN DAN BAWAH)
+                local clickX = center.X + 60
+                local clickY = center.Y + 80
+                
                 for i = 1, 1 do
-                    VIM:SendMouseButtonEvent(center.X, center.Y + 36, 0, true, game, 0)
+                    VIM:SendMouseButtonEvent(clickX, clickY, 0, true, game, 0)
                     task.wait(0.03)
-                    VIM:SendMouseButtonEvent(center.X, center.Y + 36, 0, false, game, 0)
+                    VIM:SendMouseButtonEvent(clickX, clickY, 0, false, game, 0)
                     task.wait(0.03)
                 end
                 break
@@ -431,7 +435,6 @@ local function doAutoSellTask()
     if rootPart and savedPoint2 then rootPart.CFrame = savedPoint2 end
     task.wait(1.5)
     
-    -- Recast otomatis setelah selesai jual di HP
     tapScreen()
     lastTapTime = os.clock()
     isSelling = false
