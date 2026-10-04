@@ -16,6 +16,7 @@ local savedPoint1 = nil -- Untuk Jual Ikan
 local savedPoint2 = nil -- Untuk Spot Mancing
 local instantInteractEnabled = false
 local interactConnection = nil
+local afkConnection = nil -- Variabel Anti AFK
 
 local autoFishEnabled = false
 local autoSellEnabled = false
@@ -34,6 +35,7 @@ local TAP_COOLDOWN = 28
 
 local totalCaught = 0
 local totalFavorited = 0 
+local fishInventoryCount = 0 -- [BARU] Penghitung ikan untuk Auto Sell
 local wasMinigameActive = false
 _G.IsScriptFavoriting = false
 
@@ -102,13 +104,15 @@ local TabMisc = Window:CreateTab("Misc", 4483362458)
 -- ==========================================
 local StatsParagraph = TabFarm:CreateParagraph({
     Title = "Statistik Farming",
-    Content = "Total Tangkapan: 0\nTotal Favorit: 0"
+    Content = "Total Tangkapan: 0\nTotal Favorit: 0\nIkan Terkumpul (Jual): 0/200"
 })
 
 local function UpdateStats()
     StatsParagraph:Set({
         Title = "Statistik Farming",
-        Content = "Total Tangkapan: " .. tostring(totalCaught) .. "\nTotal Favorit: " .. tostring(totalFavorited)
+        Content = "Total Tangkapan: " .. tostring(totalCaught) .. 
+                  "\nTotal Favorit: " .. tostring(totalFavorited) .. 
+                  "\nIkan Terkumpul (Jual): " .. tostring(fishInventoryCount) .. "/200"
     })
 end
 
@@ -148,19 +152,16 @@ local function tapScreen()
     local cx, cy = getScreenCenter()
     local tapPos = Vector2.new(cx, cy)
     
-    -- Simulasi sentuhan Touchscreen HP
     pcall(function()
         VIM:SendTouchEvent(0, Enum.UserInputState.Begin, tapPos)
         task.wait(0.15)
         VIM:SendTouchEvent(0, Enum.UserInputState.End, tapPos)
     end)
-    -- Simulasi Klik Mouse (Fallback / Emulator)
     pcall(function()
         VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
         task.wait(0.15)
         VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
     end)
-    -- VirtualUser Fallback
     pcall(function()
         VirtualUser:Button1Down(tapPos)
         task.wait(0.15)
@@ -281,8 +282,29 @@ TabTeleport:CreateButton({
 })
 
 -- ==========================================
--- TAB: MISC (MONEY MAGNET & INSTANT INTERACT)
+-- TAB: MISC (MONEY MAGNET, INSTANT INTERACT & ANTI AFK)
 -- ==========================================
+TabMisc:CreateToggle({
+   Name = "Anti AFK",
+   CurrentValue = false,
+   Flag = "AntiAFK",
+   Callback = function(Value)
+        if Value then
+            afkConnection = player.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK Aktif! Anti Kick Idle 20 Menit.", Duration = 3})
+        else
+            if afkConnection then
+                afkConnection:Disconnect()
+                afkConnection = nil
+            end
+            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK Dimatikan.", Duration = 3})
+        end
+   end,
+})
+
 TabMisc:CreateToggle({
    Name = "Instant Interact (Tanpa Tahan E)",
    CurrentValue = false,
@@ -379,7 +401,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ==========================================
--- LOGIKA AUTO SELL (1 KLIK)
+-- LOGIKA AUTO SELL (200 IKAN)
 -- ==========================================
 local function doAutoSellTask()
     isSelling = true
@@ -415,7 +437,6 @@ local function doAutoSellTask()
                 local absSize = gui.AbsoluteSize
                 local center = absPos + (absSize / 2)
                 
-                -- PENYESUAIAN TITIK KLIK (DIGESER LEBIH KE KANAN DAN BAWAH)
                 local clickX = center.X + 60
                 local clickY = center.Y + 80
                 
@@ -441,7 +462,7 @@ local function doAutoSellTask()
 end
 
 TabFarm:CreateToggle({
-   Name = "Auto Sell (1 Ikan)",
+   Name = "Auto Sell (Tiap 200 Ikan)",
    CurrentValue = false,
    Flag = "AutoSell",
    Callback = function(Value)
@@ -561,7 +582,7 @@ TabFarm:CreateToggle({
         if autoFishEnabled then
             lastTapTime = os.clock() 
             wasMinigameActive = false
-            task.spawn(tapScreen) -- Lemparan awal pancing saat diaktifkan
+            task.spawn(tapScreen)
         else
             setHoldState(false)
             wasMinigameActive = false
@@ -606,22 +627,27 @@ RunService.RenderStepped:Connect(function(dt)
     else
         setHoldState(false)
 
-        -- DETEKSI MINIGAME BARU SAJA SELESAI
         if wasMinigameActive then
             wasMinigameActive = false
+            
+            -- PENGHITUNG IKAN
             totalCaught = totalCaught + 1
+            fishInventoryCount = fishInventoryCount + 1
             UpdateStats()
             
-            if autoSellEnabled then
+            -- LOGIKA JUAL IKAN (TIAP 200)
+            if autoSellEnabled and fishInventoryCount >= 200 then
+                fishInventoryCount = 0 -- Reset kembali ke 0 setelah penuh
+                UpdateStats()
                 task.spawn(doAutoSellTask)
             else
-                -- ALUR MOBILE: Jeda -> Tutup Pop-Up Ikan -> Jeda -> Cast Ulang
+                -- Jika belum 200 ikan (atau auto sell mati), lempar pancing lagi
                 task.spawn(function()
-                    task.wait(1.5) -- Tunggu animasi pop-up ikan
-                    tapScreen()    -- Tap untuk tutup GUI ikan
+                    task.wait(1.5)
+                    tapScreen()
                     
-                    task.wait(1.5) -- Jeda stabil
-                    tapScreen()    -- Tap untuk re-cast pancingan
+                    task.wait(1.5)
+                    tapScreen()
                     
                     lastTapTime = os.clock()
                 end)
@@ -630,10 +656,59 @@ RunService.RenderStepped:Connect(function(dt)
 
         if isSelling then return end
 
-        -- TIMEOUT PROTECTION: Lempar ulang jika nganggur (28 detik)
         if os.clock() - lastTapTime >= TAP_COOLDOWN then
             lastTapTime = os.clock()
             task.spawn(tapScreen)
         end
     end
+end)
+
+-- ==========================================
+-- FIX MOBILE ULTIMATE: KUNCI KAMERA SAAT DRAG UI
+-- ==========================================
+task.spawn(function()
+    task.wait(2.5)
+    
+    local Camera = workspace.CurrentCamera
+    
+    local function applyCameraLockFix(container)
+        for _, gui in ipairs(container:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                for _, main in ipairs(gui:GetChildren()) do
+                    if main:IsA("Frame") and (main.Name == "Main" or main.Name:lower():find("main")) then
+                        
+                        local topbar = main:FindFirstChild("Topbar") or main:FindFirstChild("TopBar") or main
+                        
+                        topbar.InputBegan:Connect(function(input)
+                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                                Camera.CameraType = Enum.CameraType.Scriptable
+                            end
+                        end)
+                        
+                        topbar.InputEnded:Connect(function(input)
+                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                                task.delay(0.1, function()
+                                    Camera.CameraType = Enum.CameraType.Custom
+                                end)
+                            end
+                        end)
+                        
+                        UserInputService.InputEnded:Connect(function(input)
+                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                                if Camera.CameraType == Enum.CameraType.Scriptable then
+                                    task.delay(0.1, function()
+                                        Camera.CameraType = Enum.CameraType.Custom
+                                    end)
+                                end
+                            end
+                        end)
+                        
+                    end
+                end
+            end
+        end
+    end
+
+    pcall(function() applyCameraLockFix(game:GetService("CoreGui")) end)
+    pcall(function() applyCameraLockFix(game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")) end)
 end)
