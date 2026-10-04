@@ -1,571 +1,604 @@
--- Memastikan tidak ada GUI ganda
-if game.CoreGui:FindFirstChild("SimpleFishGUI") then
-    game.CoreGui.SimpleFishGUI:Destroy()
-end
-
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local VirtualUser = game:GetService("VirtualUser")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local GuiService = game:GetService("GuiService")
-local Camera = workspace.CurrentCamera
+local VIM = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local MaxFishCapacity = 200
-
-local isRunning = false
-local isAntiAfkOn = false
-local antiAfkConnection = nil
-local savedSellPosition = nil
-local savedFishPosition = nil
-local currentFishCaught = 0
-
--- Variabel Fly
-local isFlying = false
-local flySpeedLevel = 5
-local flySpeedMultiplier = 15
-local actualFlySpeed = flySpeedLevel * flySpeedMultiplier
-local flyBodyVelocity = nil
-local flyBodyGyro = nil
-local flyConnection = nil
-
-local SUPPORTED_RODS = {
-    "ZombieRod",
-    "AngelRod",
-    "DarkBladeRod",
-    "ZeusRod",
-}
-local selectedRodIndex = 1
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
 
 -- ==========================================
--- GABUNGAN GUI UTAMA
+-- VARIABEL SISTEM (AUTO FARM & LAINNYA)
 -- ==========================================
-local ScreenGui = Instance.new("ScreenGui")
-local MainFrame = Instance.new("Frame")
-local TitleLabel = Instance.new("TextLabel")
-local ToggleButton = Instance.new("TextButton")
-local AntiAfkButton = Instance.new("TextButton")
-local FishCountLabel = Instance.new("TextLabel")
-local SetFishPointButton = Instance.new("TextButton")
-local SetSellPointButton = Instance.new("TextButton")
-local SellButton = Instance.new("TextButton")
-local ExitButton = Instance.new("TextButton")
-local UICornerFrame = Instance.new("UICorner")
+local savedPoint1 = nil -- Untuk Jual Ikan
+local savedPoint2 = nil -- Untuk Spot Mancing
+local instantInteractEnabled = false
+local interactConnection = nil
 
-local RodLabel = Instance.new("TextLabel")
-local RodPrevButton = Instance.new("TextButton")
-local RodNextButton = Instance.new("TextButton")
-local RodNameLabel = Instance.new("TextLabel")
+local autoFishEnabled = false
+local autoSellEnabled = false
+local autoFavEnabled = false
+local isSelling = false
+local isScanningMemory = false
+local activeRod = nil
 
-local FlySeparator = Instance.new("Frame")
-local FlyToggleButton = Instance.new("TextButton")
-local FlySpeedMinusBtn = Instance.new("TextButton")
-local FlySpeedLabel = Instance.new("TextLabel")
-local FlySpeedPlusBtn = Instance.new("TextButton")
+local minigameTable = nil
+local isCurrentlyHolding = false
+local lastTapTime = 0
+local HOLD_DELAY   = 0.08  
+local LOWER_BUFFER = 0.045 
+local UPPER_BUFFER = 0.045 
+local TAP_COOLDOWN = 28    
 
-ScreenGui.Name = "SimpleFishGUI"
-ScreenGui.Parent = game.CoreGui
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.ResetOnSpawn = false 
-
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-MainFrame.Position = UDim2.new(0.5, -75, 0.5, -202)
-MainFrame.Size = UDim2.new(0, 150, 0, 405)
-MainFrame.Active = true
-MainFrame.Draggable = true
-UICornerFrame.CornerRadius = UDim.new(0, 8)
-UICornerFrame.Parent = MainFrame
-
-TitleLabel.Name = "TitleLabel"
-TitleLabel.Parent = MainFrame
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.Position = UDim2.new(0, 10, 0, 0)
-TitleLabel.Size = UDim2.new(0, 115, 0, 25)
-TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "BY ORANG GANTENG"
-TitleLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-TitleLabel.TextSize = 10
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-ExitButton.Name = "ExitButton"
-ExitButton.Parent = MainFrame
-ExitButton.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-ExitButton.BorderSizePixel = 0
-ExitButton.Position = UDim2.new(0, 125, 0, 0)
-ExitButton.Size = UDim2.new(0, 25, 0, 25)
-ExitButton.Font = Enum.Font.GothamBold
-ExitButton.Text = "X"
-ExitButton.TextColor3 = Color3.fromRGB(150, 150, 150)
-ExitButton.TextSize = 12
-
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Parent = MainFrame
-ToggleButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-ToggleButton.Position = UDim2.new(0, 10, 0, 30)
-ToggleButton.Size = UDim2.new(0, 130, 0, 30)
-ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.Text = "Auto Fish: OFF"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 75, 75)
-ToggleButton.TextSize = 12
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(0, 6)
-ToggleCorner.Parent = ToggleButton
-
-AntiAfkButton.Name = "AntiAfkButton"
-AntiAfkButton.Parent = MainFrame
-AntiAfkButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-AntiAfkButton.Position = UDim2.new(0, 10, 0, 65)
-AntiAfkButton.Size = UDim2.new(0, 130, 0, 25)
-AntiAfkButton.Font = Enum.Font.GothamBold
-AntiAfkButton.Text = "Anti-AFK: OFF"
-AntiAfkButton.TextColor3 = Color3.fromRGB(255, 75, 75)
-AntiAfkButton.TextSize = 11
-local AntiAfkCorner = Instance.new("UICorner")
-AntiAfkCorner.CornerRadius = UDim.new(0, 6)
-AntiAfkCorner.Parent = AntiAfkButton
-
-FishCountLabel.Name = "FishCountLabel"
-FishCountLabel.Parent = MainFrame
-FishCountLabel.BackgroundTransparency = 1
-FishCountLabel.Position = UDim2.new(0, 10, 0, 95)
-FishCountLabel.Size = UDim2.new(0, 130, 0, 20)
-FishCountLabel.Font = Enum.Font.GothamSemibold
-FishCountLabel.Text = "Fish: 0 / " .. MaxFishCapacity
-FishCountLabel.TextColor3 = Color3.fromRGB(255, 255, 150)
-FishCountLabel.TextSize = 11
-
--- === PILIHAN ROD ===
-RodLabel.Name = "RodLabel"
-RodLabel.Parent = MainFrame
-RodLabel.BackgroundTransparency = 1
-RodLabel.Position = UDim2.new(0, 10, 0, 118)
-RodLabel.Size = UDim2.new(0, 130, 0, 16)
-RodLabel.Font = Enum.Font.GothamSemibold
-RodLabel.Text = "Pilih Rod:"
-RodLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-RodLabel.TextSize = 10
-RodLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-RodPrevButton.Name = "RodPrevButton"
-RodPrevButton.Parent = MainFrame
-RodPrevButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-RodPrevButton.Position = UDim2.new(0, 10, 0, 135)
-RodPrevButton.Size = UDim2.new(0, 22, 0, 22)
-RodPrevButton.Font = Enum.Font.GothamBold
-RodPrevButton.Text = "<"
-RodPrevButton.TextColor3 = Color3.fromRGB(200, 200, 200)
-RodPrevButton.TextSize = 12
-local PrevCorner = Instance.new("UICorner")
-PrevCorner.CornerRadius = UDim.new(0, 4)
-PrevCorner.Parent = RodPrevButton
-
-RodNameLabel.Name = "RodNameLabel"
-RodNameLabel.Parent = MainFrame
-RodNameLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-RodNameLabel.Position = UDim2.new(0, 35, 0, 135)
-RodNameLabel.Size = UDim2.new(0, 72, 0, 22)
-RodNameLabel.Font = Enum.Font.GothamBold
-RodNameLabel.Text = SUPPORTED_RODS[selectedRodIndex]
-RodNameLabel.TextColor3 = Color3.fromRGB(100, 220, 255)
-RodNameLabel.TextSize = 9
-RodNameLabel.TextScaled = true
-local RodNameCorner = Instance.new("UICorner")
-RodNameCorner.CornerRadius = UDim.new(0, 4)
-RodNameCorner.Parent = RodNameLabel
-
-RodNextButton.Name = "RodNextButton"
-RodNextButton.Parent = MainFrame
-RodNextButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-RodNextButton.Position = UDim2.new(0, 110, 0, 135)
-RodNextButton.Size = UDim2.new(0, 22, 0, 22)
-RodNextButton.Font = Enum.Font.GothamBold
-RodNextButton.Text = ">"
-RodNextButton.TextColor3 = Color3.fromRGB(200, 200, 200)
-RodNextButton.TextSize = 12
-local NextCorner = Instance.new("UICorner")
-NextCorner.CornerRadius = UDim.new(0, 4)
-NextCorner.Parent = RodNextButton
-
-local function UpdateRodDisplay()
-    RodNameLabel.Text = SUPPORTED_RODS[selectedRodIndex]
-end
-
-RodPrevButton.Activated:Connect(function()
-    selectedRodIndex = selectedRodIndex - 1
-    if selectedRodIndex < 1 then selectedRodIndex = #SUPPORTED_RODS end
-    UpdateRodDisplay()
-end)
-
-RodNextButton.Activated:Connect(function()
-    selectedRodIndex = selectedRodIndex + 1
-    if selectedRodIndex > #SUPPORTED_RODS then selectedRodIndex = 1 end
-    UpdateRodDisplay()
-end)
--- === AKHIR PILIHAN ROD ===
-
-SetFishPointButton.Name = "SetFishPointButton"
-SetFishPointButton.Parent = MainFrame
-SetFishPointButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-SetFishPointButton.Position = UDim2.new(0, 10, 0, 165)
-SetFishPointButton.Size = UDim2.new(0, 130, 0, 28)
-SetFishPointButton.Font = Enum.Font.GothamBold
-SetFishPointButton.Text = "Set Point Mancing"
-SetFishPointButton.TextColor3 = Color3.fromRGB(200, 200, 200)
-SetFishPointButton.TextSize = 11
-local FishCorner = Instance.new("UICorner")
-FishCorner.CornerRadius = UDim.new(0, 6)
-FishCorner.Parent = SetFishPointButton
-
-SetSellPointButton.Name = "SetSellPointButton"
-SetSellPointButton.Parent = MainFrame
-SetSellPointButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-SetSellPointButton.Position = UDim2.new(0, 10, 0, 200)
-SetSellPointButton.Size = UDim2.new(0, 130, 0, 28)
-SetSellPointButton.Font = Enum.Font.GothamBold
-SetSellPointButton.Text = "Set Point Jual"
-SetSellPointButton.TextColor3 = Color3.fromRGB(200, 200, 200)
-SetSellPointButton.TextSize = 11
-local SellCorner = Instance.new("UICorner")
-SellCorner.CornerRadius = UDim.new(0, 6)
-SellCorner.Parent = SetSellPointButton
-
-SellButton.Name = "SellButton"
-SellButton.Parent = MainFrame
-SellButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-SellButton.Position = UDim2.new(0, 10, 0, 235)
-SellButton.Size = UDim2.new(0, 130, 0, 28)
-SellButton.Font = Enum.Font.GothamBold
-SellButton.Text = "Sell Now"
-SellButton.TextColor3 = Color3.fromRGB(150, 150, 150)
-SellButton.TextSize = 11
-local SellNowCorner = Instance.new("UICorner")
-SellNowCorner.CornerRadius = UDim.new(0, 6)
-SellNowCorner.Parent = SellButton
-
--- === BAGIAN MENU FLY ===
-FlySeparator.Name = "FlySeparator"
-FlySeparator.Parent = MainFrame
-FlySeparator.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-FlySeparator.BorderSizePixel = 0
-FlySeparator.Position = UDim2.new(0, 10, 0, 275)
-FlySeparator.Size = UDim2.new(0, 130, 0, 1)
-
-FlyToggleButton.Name = "FlyToggleButton"
-FlyToggleButton.Parent = MainFrame
-FlyToggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
-FlyToggleButton.Position = UDim2.new(0, 10, 0, 285)
-FlyToggleButton.Size = UDim2.new(0, 130, 0, 28)
-FlyToggleButton.Font = Enum.Font.GothamBold
-FlyToggleButton.Text = "Terbang: OFF"
-FlyToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-FlyToggleButton.TextSize = 11
-local FlyBtnCorner = Instance.new("UICorner")
-FlyBtnCorner.CornerRadius = UDim.new(0, 6)
-FlyBtnCorner.Parent = FlyToggleButton
-
-FlySpeedMinusBtn.Name = "FlySpeedMinusBtn"
-FlySpeedMinusBtn.Parent = MainFrame
-FlySpeedMinusBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-FlySpeedMinusBtn.Position = UDim2.new(0, 10, 0, 323)
-FlySpeedMinusBtn.Size = UDim2.new(0, 28, 0, 25)
-FlySpeedMinusBtn.Font = Enum.Font.GothamBold
-FlySpeedMinusBtn.Text = "-"
-FlySpeedMinusBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-FlySpeedMinusBtn.TextSize = 12
-local MinusCorner = Instance.new("UICorner")
-MinusCorner.CornerRadius = UDim.new(0, 4)
-MinusCorner.Parent = FlySpeedMinusBtn
-
-FlySpeedLabel.Name = "FlySpeedLabel"
-FlySpeedLabel.Parent = MainFrame
-FlySpeedLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-FlySpeedLabel.Position = UDim2.new(0, 43, 0, 323)
-FlySpeedLabel.Size = UDim2.new(0, 64, 0, 25)
-FlySpeedLabel.Font = Enum.Font.GothamBold
-FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
-FlySpeedLabel.TextColor3 = Color3.fromRGB(100, 220, 255)
-FlySpeedLabel.TextSize = 10
-FlySpeedLabel.TextScaled = true
-local SpeedLblCorner = Instance.new("UICorner")
-SpeedLblCorner.CornerRadius = UDim.new(0, 4)
-SpeedLblCorner.Parent = FlySpeedLabel
-
-FlySpeedPlusBtn.Name = "FlySpeedPlusBtn"
-FlySpeedPlusBtn.Parent = MainFrame
-FlySpeedPlusBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-FlySpeedPlusBtn.Position = UDim2.new(0, 112, 0, 323)
-FlySpeedPlusBtn.Size = UDim2.new(0, 28, 0, 25)
-FlySpeedPlusBtn.Font = Enum.Font.GothamBold
-FlySpeedPlusBtn.Text = "+"
-FlySpeedPlusBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-FlySpeedPlusBtn.TextSize = 12
-local PlusCorner = Instance.new("UICorner")
-PlusCorner.CornerRadius = UDim.new(0, 4)
-PlusCorner.Parent = FlySpeedPlusBtn
--- ==========================================
-
-SetFishPointButton.Activated:Connect(function()
-    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        savedFishPosition = rootPart.CFrame
-        SetFishPointButton.Text = "Fish Point Saved!"
-        task.wait(1.5)
-        SetFishPointButton.Text = "Set Point Mancing"
-    end
-end)
-
-SetSellPointButton.Activated:Connect(function()
-    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        savedSellPosition = rootPart.CFrame
-        SetSellPointButton.Text = "Sell Point Saved!"
-        task.wait(1.5)
-        SetSellPointButton.Text = "Set Point Jual"
-    end
-end)
+local totalCaught = 0
+local totalFavorited = 0 
+local wasMinigameActive = false
+_G.IsScriptFavoriting = false
 
 -- ==========================================
--- SISTEM HOLD KOORDINAT TETAP (SELL ALL)
+-- VARIABEL SISTEM (MONEY MAGNET)
 -- ==========================================
-local function HoldFixedSellAll()
-    pcall(function()
-        local camera = workspace.CurrentCamera
-        local viewportSize = camera.ViewportSize
-        
-        -- Berdasarkan gambar, posisi tombol "Sell All" berada di tengah agak ke kiri bawah dari kotak opsi.
-        -- Kita arahkan titik sentuhnya tepat ke tengah layar, sedikit digeser ke kiri.
-        local targetX = (viewportSize.X / 2) - 85
-        local targetY = (viewportSize.Y / 2) + 15
-        
-        -- Simulasi Menahan (Hold) Layar menggunakan VirtualInputManager
-        VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, true, game, 1)
-        task.wait(2.0) -- Tahan selama 2 detik penuh agar sistem game mendeteksinya sebagai "Hold"
-        VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, false, game, 1)
+local magnetEnabled = false
+local moneyKeywords = {"money", "cash", "coin", "dollar", "uang", "koin", "drop", "loot", "gem"}
+local moneyCache = {}
+local magnetCurrentIndex = 1
+
+-- ==========================================
+-- HOOKING: DETEKSI UNFAVORITE MANUAL
+-- ==========================================
+local successHook, errorMsg = pcall(function()
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FireServer" and tostring(self) == "ToggleFavorite" then
+            if not _G.IsScriptFavoriting then
+                local args = {...}
+                local uuid = args[1]
+                if uuid and type(uuid) == "string" and _G.FavoritedFish then
+                    _G.FavoritedFish[uuid] = nil
+                end
+            end
+        end
+        return oldNamecall(self, ...)
     end)
+end)
+
+if not successHook then
+    warn("Executor kamu tidak mendukung Hooking, Auto Re-favorite manual mungkin tidak bekerja.")
 end
 
-local function GoAndSell()
-    if not savedSellPosition then return end
-    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
+-- ==========================================
+-- MEMUAT RAYFIELD UI LIBRARY
+-- ==========================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Pantai Voice Chat",
+   LoadingTitle = "GOOY HUB",
+   LoadingSubtitle = "By IGOY",
+   ConfigurationSaving = {
+      Enabled = false,
+      FileName = "Script pantai voice"
+   },
+   Discord = {
+      Enabled = false,
+      RememberJoins = true 
+   },
+   KeySystem = false
+})
+
+-- ==========================================
+-- TABS
+-- ==========================================
+local TabFarm = Window:CreateTab("Auto Farm", 4483362458)
+local TabPancingan = Window:CreateTab("Pancingan", 4483362458)
+local TabTeleport = Window:CreateTab("Teleport", 4483362458)
+local TabMisc = Window:CreateTab("Misc", 4483362458)
+
+-- ==========================================
+-- FUNGSI UPDATE STATISTIK
+-- ==========================================
+local StatsParagraph = TabFarm:CreateParagraph({
+    Title = "Statistik Farming",
+    Content = "Total Tangkapan: 0\nTotal Favorit: 0"
+})
+
+local function UpdateStats()
+    StatsParagraph:Set({
+        Title = "Statistik Farming",
+        Content = "Total Tangkapan: " .. tostring(totalCaught) .. "\nTotal Favorit: " .. tostring(totalFavorited)
+    })
+end
+
+-- ==========================================
+-- LOGIKA BANTUAN (ROOT PART & INTERACT)
+-- ==========================================
+local function getRootPart()
+    local character = player.Character or player.CharacterAdded:Wait()
+    return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function modifyPrompt(prompt)
+    if prompt:IsA("ProximityPrompt") then
+        if not prompt:GetAttribute("OriginalDuration") then
+            prompt:SetAttribute("OriginalDuration", prompt.HoldDuration)
+        end
+        prompt.HoldDuration = 0
+    end
+end
+
+-- ==========================================
+-- TAB: PANCINGAN (AUTO EQUIP)
+-- ==========================================
+TabPancingan:CreateSection("Auto Equip Pancingan")
+
+local function EquipRod(rodName)
+    local character = player.Character
+    if not character then return end
     
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local backpack = player:WaitForChild("Backpack")
+    
+    if humanoid then
+        local tool = backpack:FindFirstChild(rodName) or character:FindFirstChild(rodName)
+        if tool then humanoid:EquipTool(tool) end
+    end
+end
+
+local function UnequipRods()
+    local character = player.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid:UnequipTools() end
+    end
+end
+
+task.spawn(function()
+    while task.wait(1) do
+        if activeRod then
+            local char = player.Character
+            if char and not char:FindFirstChild(activeRod) then EquipRod(activeRod) end
+        end
+    end
+end)
+
+local rodList = {
+    "ZeusRod", "DarkBladeRod", "AngelRod", 
+    "WorldCupRod", "LunarEclipse", "DiamondScytheRod"
+}
+
+for _, rodName in ipairs(rodList) do
+    TabPancingan:CreateToggle({
+        Name = "Equip " .. rodName,
+        CurrentValue = false,
+        Flag = "Equip_" .. rodName,
+        Callback = function(Value)
+            if Value then
+                activeRod = rodName
+                EquipRod(rodName)
+            else
+                if activeRod == rodName then
+                    activeRod = nil
+                    UnequipRods()
+                end
+            end
+        end,
+    })
+end
+
+-- ==========================================
+-- TAB: TELEPORT
+-- ==========================================
+TabTeleport:CreateSection("Lokasi Jual Ikan")
+
+TabTeleport:CreateButton({
+   Name = "Spot Jual",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart then
+            savedPoint1 = rootPart.CFrame
+            Rayfield:Notify({Title = "Sukses", Content = "Spot Jual Ikan berhasil disimpan!", Duration = 3})
+        end
+   end,
+})
+
+TabTeleport:CreateButton({
+   Name = "Teleport ke Spot Jual",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart and savedPoint1 then 
+            rootPart.CFrame = savedPoint1 
+        else
+            Rayfield:Notify({Title = "Gagal", Content = "Spot Jual Ikan belum disimpan!", Duration = 3})
+        end
+   end,
+})
+
+TabTeleport:CreateSection("Lokasi Spot Mancing")
+
+TabTeleport:CreateButton({
+   Name = "Spot Mancing",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart then
+            savedPoint2 = rootPart.CFrame
+            Rayfield:Notify({Title = "Sukses", Content = "Spot Mancing berhasil disimpan!", Duration = 3})
+        end
+   end,
+})
+
+TabTeleport:CreateButton({
+   Name = "Teleport ke Spot Mancing",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart and savedPoint2 then 
+            rootPart.CFrame = savedPoint2 
+        else
+            Rayfield:Notify({Title = "Gagal", Content = "Spot Mancing belum disimpan!", Duration = 3})
+        end
+   end,
+})
+
+-- ==========================================
+-- TAB: MISC (MONEY MAGNET & INSTANT INTERACT)
+-- ==========================================
+TabMisc:CreateToggle({
+   Name = "Instant Interact (Tanpa Tahan E)",
+   CurrentValue = false,
+   Flag = "InstantInteract",
+   Callback = function(Value)
+        instantInteractEnabled = Value
+        if instantInteractEnabled then
+            for _, obj in pairs(workspace:GetDescendants()) do modifyPrompt(obj) end
+            interactConnection = workspace.DescendantAdded:Connect(function(obj) modifyPrompt(obj) end)
+        else
+            if interactConnection then interactConnection:Disconnect(); interactConnection = nil end
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") and obj:GetAttribute("OriginalDuration") then
+                    obj.HoldDuration = obj:GetAttribute("OriginalDuration")
+                end
+            end
+        end
+   end,
+})
+
+TabMisc:CreateToggle({
+   Name = "Ultra-Smooth Money Magnet",
+   CurrentValue = false,
+   Flag = "MoneyMagnetToggle",
+   Callback = function(Value)
+        magnetEnabled = Value
+   end,
+})
+
+-- ==========================================
+-- LOGIKA MONEY MAGNET CACHING & LOOP
+-- ==========================================
+local function isInsidePlayerFast(obj)
+    local ancestor = obj:FindFirstAncestorOfClass("Model")
+    return ancestor and ancestor:FindFirstChild("Humanoid") ~= nil
+end
+
+local function isMoneyPart(obj)
+    if not obj:IsA("BasePart") then return false end
+    if isInsidePlayerFast(obj) then return false end
+    
+    local lname = string.lower(obj.Name)
+    for _, kw in ipairs(moneyKeywords) do
+        if string.find(lname, kw) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Caching awal uang
+task.spawn(function()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isMoneyPart(obj) then table.insert(moneyCache, obj) end
+    end
+end)
+
+-- Menangkap uang baru
+workspace.DescendantAdded:Connect(function(obj)
+    task.delay(0.05, function()
+        if isMoneyPart(obj) then table.insert(moneyCache, obj) end
+    end)
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not magnetEnabled then return end
+    
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if hrp and #moneyCache > 0 then
+        local batchSize = 20 -- SUDAH DIGANTI MENJADI 20
+        local processed = 0
+        
+        while processed < batchSize and #moneyCache > 0 do
+            if magnetCurrentIndex > #moneyCache then magnetCurrentIndex = 1 end
+            
+            local obj = moneyCache[magnetCurrentIndex]
+            
+            if not obj or not obj.Parent or not obj:IsDescendantOf(workspace) then
+                table.remove(moneyCache, magnetCurrentIndex)
+            else
+                local touch = obj:FindFirstChildOfClass("TouchTransmitter") or obj:FindFirstChild("TouchInterest")
+                if touch and firetouchinterest then
+                    firetouchinterest(hrp, obj, 0)
+                    firetouchinterest(hrp, obj, 1)
+                end
+                
+                if not obj.Anchored then obj.CFrame = hrp.CFrame end
+                
+                magnetCurrentIndex = magnetCurrentIndex + 1
+                processed = processed + 1
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- LOGIKA AUTO SELL (200 KLIK)
+-- ==========================================
+local function doAutoSellTask()
+    isSelling = true
+    local rootPart = getRootPart()
+    
+    if rootPart and savedPoint1 then rootPart.CFrame = savedPoint1 end
+    task.wait(6)
+    
+    VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.2)
+    VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+
     if rootPart then
-        local returnPos = savedFishPosition or rootPart.CFrame
-        
-        -- 1. Teleport ke lokasi NPC Jual
-        rootPart.CFrame = savedSellPosition
-        task.wait(2)
-        
-        -- 2. Picu ProximityPrompt (Kotak Hitam) NPC secara otomatis
         for _, obj in pairs(workspace:GetDescendants()) do
             if obj:IsA("ProximityPrompt") then
-                local actionText = string.lower(obj.ActionText)
-                local objectText = string.lower(obj.ObjectText)
+                local dist = (obj.Parent.Position - rootPart.Position).Magnitude
+                if dist <= obj.MaxActivationDistance + 5 then
+                    pcall(function() if fireproximityprompt then fireproximityprompt(obj) end end)
+                end
+            end
+        end
+    end
+
+    task.wait(2)
+    
+    for _, gui in pairs(PlayerGui:GetDescendants()) do
+        if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+            local text = gui:IsA("TextButton") and string.lower(gui.Text) or ""
+            local name = string.lower(gui.Name)
+            
+            if string.find(text, "sell") or string.find(name, "sell") or string.find(text, "jual") then
+                local absPos = gui.AbsolutePosition
+                local absSize = gui.AbsoluteSize
+                local center = absPos + (absSize / 2)
                 
-                if actionText:find("sell") or actionText:find("jual") or objectText:find("sell") or objectText:find("jual") then
-                    local part = obj.Parent
-                    if part and part:IsA("BasePart") then
-                        local distance = (part.Position - rootPart.Position).Magnitude
-                        if distance <= (obj.MaxActivationDistance + 10) then
-                            if fireproximityprompt then
-                                fireproximityprompt(obj, 1)
-                            else
-                                obj:InputHoldBegin()
-                                task.wait(obj.HoldDuration + 0.2)
-                                obj:InputHoldEnd()
+                for i = 1, 200 do
+                    VIM:SendMouseButtonEvent(center.X, center.Y + 36, 0, true, game, 0)
+                    task.wait(0.03)
+                    VIM:SendMouseButtonEvent(center.X, center.Y + 36, 0, false, game, 0)
+                    task.wait(0.03)
+                end
+                break
+            end
+        end
+    end
+    
+    task.wait(1)
+    
+    if rootPart and savedPoint2 then rootPart.CFrame = savedPoint2 end
+    task.wait(1)
+    
+    lastTapTime = 0
+    isSelling = false
+end
+
+TabFarm:CreateToggle({
+   Name = "Auto Sell (200 Ikan)",
+   CurrentValue = false,
+   Flag = "AutoSell",
+   Callback = function(Value)
+        if Value then
+            if not savedPoint1 or not savedPoint2 then
+                Rayfield:Notify({Title = "Peringatan", Content = "Set Spot Jual & Mancing Dulu di Tab Teleport!", Duration = 4})
+                autoSellEnabled = false
+                return
+            end
+        end
+        autoSellEnabled = Value
+   end,
+})
+
+-- ==========================================
+-- LOGIKA AUTO FAVORITE (MYTHICAL)
+-- ==========================================
+_G.FavoritedFish = _G.FavoritedFish or {}
+local uuidPattern = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
+
+local function scanMemoryAndFavorite()
+    if not autoFavEnabled or isScanningMemory then return end
+    isScanningMemory = true
+    
+    local success, ToggleFavorite = pcall(function()
+        local invSys = ReplicatedStorage:WaitForChild("InventorySystem", 2)
+        if not invSys then return nil end
+        local invRem = invSys:WaitForChild("InventoryRemotes", 2)
+        if not invRem then return nil end
+        return invRem:WaitForChild("ToggleFavorite", 2)
+    end)
+    
+    if not success or not ToggleFavorite then 
+        isScanningMemory = false
+        return 
+    end
+
+    local tablesScanned = 0
+    local gc = getgc(true)
+
+    for _, tbl in pairs(gc) do
+        if not autoFavEnabled then break end
+        if type(tbl) == "table" then
+            pcall(function()
+                for k, v in pairs(tbl) do
+                    if type(k) == "string" and string.match(k, uuidPattern) and type(v) == "table" then
+                        for _, subV in pairs(v) do
+                            if type(subV) == "string" and string.find(string.lower(subV), "mythical") then
+                                if not _G.FavoritedFish[k] then
+                                    _G.FavoritedFish[k] = true
+                                    _G.IsScriptFavoriting = true
+                                    ToggleFavorite:FireServer(k)
+                                    _G.IsScriptFavoriting = false
+                                    totalFavorited = totalFavorited + 1
+                                    UpdateStats()
+                                end
+                                break
                             end
-                            break
+                        end
+                    elseif type(v) == "string" and string.match(v, uuidPattern) then
+                        for _, sibV in pairs(tbl) do
+                            if type(sibV) == "string" and string.find(string.lower(sibV), "mythical") then
+                                if not _G.FavoritedFish[v] then
+                                    _G.FavoritedFish[v] = true
+                                    _G.IsScriptFavoriting = true
+                                    ToggleFavorite:FireServer(v)
+                                    _G.IsScriptFavoriting = false
+                                    totalFavorited = totalFavorited + 1
+                                    UpdateStats()
+                                end
+                                break
+                            end
                         end
                     end
                 end
-            end
+            end)
+            tablesScanned = tablesScanned + 1
+            if tablesScanned % 150 == 0 then task.wait() end
         end
+    end
+    isScanningMemory = false
+end
 
-        -- 3. Tunggu hingga UI pilihan "Sell All" muncul di layar
-        task.wait(2.0)
-        
-        -- 4. Jalankan Tahanan (Hold) pada tombol Sell All yang posisinya tetap di layar
-        HoldFixedSellAll()
-        task.wait(1.0)
-        
-        -- 5. Kembali ke tempat mancing semula
-        rootPart.CFrame = returnPos
+TabFarm:CreateToggle({
+   Name = "Auto Fav (Mythical)",
+   CurrentValue = false,
+   Flag = "AutoFav",
+   Callback = function(Value)
+        autoFavEnabled = Value
+        if autoFavEnabled then
+            _G.FavoritedFish = {} 
+            totalFavorited = 0 
+            UpdateStats()
+            scanMemoryAndFavorite()
+        else
+            isScanningMemory = false
+        end
+   end,
+})
+
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if autoFavEnabled then scanMemoryAndFavorite() end
+    end
+end)
+
+-- ==========================================
+-- LOGIKA AUTO FISH
+-- ==========================================
+local function setHoldState(shouldHold)
+    if isCurrentlyHolding ~= shouldHold then
+        isCurrentlyHolding = shouldHold
+        VIM:SendMouseButtonEvent(500, 500, 0, shouldHold, game, 0)
     end
 end
--- ==========================================
 
-SellButton.Activated:Connect(function()
-    if savedSellPosition then
-        SellButton.Text = "Selling..."
-        GoAndSell()
-        currentFishCaught = 0
-        SellButton.Text = "Sell Now"
-    else
-        SellButton.Text = "No Sell Point!"
-        task.wait(1.5)
-        SellButton.Text = "Sell Now"
-    end
-end)
-
-ToggleButton.Activated:Connect(function()
-    isRunning = not isRunning
-    if isRunning then
-        ToggleButton.Text = "Auto Fish: ON"
-        ToggleButton.TextColor3 = Color3.fromRGB(75, 255, 75)
-    else
-        ToggleButton.Text = "Auto Fish: OFF"
-        ToggleButton.TextColor3 = Color3.fromRGB(255, 75, 75)
-    end
-end)
-
-AntiAfkButton.Activated:Connect(function()
-    isAntiAfkOn = not isAntiAfkOn
-    if isAntiAfkOn then
-        AntiAfkButton.Text = "Anti-AFK: ON"
-        AntiAfkButton.TextColor3 = Color3.fromRGB(75, 255, 75)
-        if not antiAfkConnection then
-            antiAfkConnection = LocalPlayer.Idled:Connect(function()
-                VirtualUser:CaptureController()
-                VirtualUser:ClickButton2(Vector2.new())
-            end)
-        end
-    else
-        AntiAfkButton.Text = "Anti-AFK: OFF"
-        AntiAfkButton.TextColor3 = Color3.fromRGB(255, 75, 75)
-        if antiAfkConnection then
-            antiAfkConnection:Disconnect()
-            antiAfkConnection = nil
-        end
-    end
-end)
-
-ExitButton.Activated:Connect(function()
-    isRunning = false
-    isAntiAfkOn = false
-    if antiAfkConnection then antiAfkConnection:Disconnect() antiAfkConnection = nil end
-    if isFlying then stopFlying() end
-    if ScreenGui then ScreenGui:Destroy() end
-end)
-
--- Logika Terbang (Fly)
-function startFlying()
-    local character = LocalPlayer.Character
-    if not character then return end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not rootPart or not humanoid then return end
-    isFlying = true
-    FlyToggleButton.Text = "Terbang: ON"
-    FlyToggleButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-    humanoid.PlatformStand = true
-    flyBodyVelocity = Instance.new("BodyVelocity")
-    flyBodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    flyBodyVelocity.Parent = rootPart
-    flyBodyGyro = Instance.new("BodyGyro")
-    flyBodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    flyBodyGyro.P = 15000
-    flyBodyGyro.CFrame = Camera.CFrame
-    flyBodyGyro.Parent = rootPart
-    
-    flyConnection = RunService.RenderStepped:Connect(function()
-        if not isFlying or not character.Parent then return end
-        local direction = Vector3.new(0, 0, 0)
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction = direction + Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction = direction - Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction = direction - Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction = direction + Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.E) then direction = direction + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then direction = direction - Vector3.new(0, 1, 0) end
-        if direction.Magnitude > 0 then direction = direction.Unit end
-        flyBodyVelocity.Velocity = direction * actualFlySpeed
-        flyBodyGyro.CFrame = Camera.CFrame
+local function tapScreen()
+    pcall(function()
+        VIM:SendTouchEvent(0, Enum.UserInputState.Begin, Vector2.new(500, 500))
+        task.wait(0.05)
+        VIM:SendTouchEvent(0, Enum.UserInputState.End, Vector2.new(500, 500))
+    end)
+    pcall(function()
+        VIM:SendMouseButtonEvent(500, 500, 0, true, game, 0)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(500, 500, 0, false, game, 0)
+    end)
+    pcall(function()
+        VirtualUser:Button1Down(Vector2.new(500, 500))
+        task.wait(0.05)
+        VirtualUser:Button1Up(Vector2.new(500, 500))
     end)
 end
 
-function stopFlying()
-    isFlying = false
-    FlyToggleButton.Text = "Terbang: OFF"
-    FlyToggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
-    if flyBodyVelocity then flyBodyVelocity:Destroy() end
-    if flyBodyGyro then flyBodyGyro:Destroy() end
-    if flyConnection then flyConnection:Disconnect() end
-    local character = LocalPlayer.Character
-    if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid.PlatformStand = false end
+TabFarm:CreateToggle({
+   Name = "Auto Fish",
+   CurrentValue = false,
+   Flag = "AutoFish",
+   Callback = function(Value)
+        autoFishEnabled = Value
+        if autoFishEnabled then
+            lastTapTime = 0 
+        else
+            setHoldState(false)
+        end
+   end,
+})
+
+local function getMinigameData()
+    if minigameTable and minigameTable.isGameActive ~= nil then
+        return minigameTable
     end
+    for _, v in pairs(getgc(true)) do
+        if type(v) == "table" and rawget(v, "isGameActive") ~= nil and rawget(v, "detecSize") ~= nil then
+            minigameTable = v
+            return minigameTable
+        end
+    end
+    return nil
 end
 
-FlyToggleButton.Activated:Connect(function()
-    if isFlying then stopFlying() else startFlying() end
-end)
+local timer = 0
+RunService.RenderStepped:Connect(function(dt)
+    if not autoFishEnabled then return end
 
-FlySpeedPlusBtn.Activated:Connect(function()
-    if flySpeedLevel < 10 then
-        flySpeedLevel = flySpeedLevel + 1
-        FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
-        actualFlySpeed = flySpeedLevel * flySpeedMultiplier
-    end
-end)
+    local data = getMinigameData()
 
-FlySpeedMinusBtn.Activated:Connect(function()
-    if flySpeedLevel > 1 then
-        flySpeedLevel = flySpeedLevel - 1
-        FlySpeedLabel.Text = "Speed: " .. flySpeedLevel
-        actualFlySpeed = flySpeedLevel * flySpeedMultiplier
-    end
-end)
+    if data and data.isGameActive then
+        wasMinigameActive = true
+        if data.Detec and data.Attc then
+            timer = timer + dt
+            if timer < HOLD_DELAY then return end
+            timer = 0
 
-LocalPlayer.CharacterAdded:Connect(function()
-    if isFlying then stopFlying() end
-end)
+            local detecPos = data.Detec.Position.X.Scale + (data.detecSize / 2)
+            local attcPos = data.Attc.Position.X.Scale + (data.attcSize / 2)
 
--- Loop Utama Mancing
-task.spawn(function()
-    while ScreenGui and ScreenGui.Parent ~= nil do
-        task.wait(1)
-        FishCountLabel.Text = "Fish: " .. currentFishCaught .. " / " .. MaxFishCapacity
-        if isRunning then
+            if not isCurrentlyHolding and detecPos < (attcPos - LOWER_BUFFER) then
+                setHoldState(true)
+            elseif isCurrentlyHolding and detecPos > (attcPos + UPPER_BUFFER) then
+                setHoldState(false)
+            end
+        end
+    else
+        if wasMinigameActive then
+            totalCaught = totalCaught + 1
+            UpdateStats()
+            wasMinigameActive = false
             
-            if savedSellPosition ~= nil and currentFishCaught >= MaxFishCapacity then
-                SellButton.Text = "Bag Full!"
-                GoAndSell()
-                currentFishCaught = 0
-                local character = LocalPlayer.Character
-                local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-                
-                for i = 5, 1, -1 do
-                    if not isRunning or not ScreenGui.Parent then break end
-                    SellButton.Text = "Waiting " .. i .. "s"
-                    if rootPart and savedFishPosition then rootPart.CFrame = savedFishPosition end
-                    task.wait(1)
-                end
-                SellButton.Text = "Sell Now"
+            if autoSellEnabled then
+                task.spawn(doAutoSellTask)
             end
+        end
 
-            local character = LocalPlayer.Character
-            local selectedRodName = SUPPORTED_RODS[selectedRodIndex]
-            local rod = character and character:FindFirstChild(selectedRodName)
-            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+        if isSelling then return end
 
-            if rod and rootPart then
-                if savedFishPosition then rootPart.CFrame = savedFishPosition end
-                local targetPos = rootPart.CFrame * CFrame.new(0, 0, -50).Position
-                rod.CastToPosition:FireServer(targetPos)
-                task.wait(17)
-                local miniGameEvent = rod:FindFirstChild("MiniGame")
-                if miniGameEvent then
-                    miniGameEvent:FireServer("Complete")
-                    currentFishCaught = currentFishCaught + 1
-                end
-                task.wait(math.random(2, 4))
-            end
+        setHoldState(false)
+        if os.clock() - lastTapTime >= TAP_COOLDOWN then
+            lastTapTime = os.clock()
+            task.spawn(tapScreen)
         end
     end
 end)
