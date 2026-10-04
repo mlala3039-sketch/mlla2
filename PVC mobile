@@ -1,0 +1,636 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VIM = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera = workspace.CurrentCamera
+
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
+
+-- ==========================================
+-- VARIABEL SISTEM (AUTO FARM & LAINNYA)
+-- ==========================================
+local savedPoint1 = nil -- Untuk Jual Ikan
+local savedPoint2 = nil -- Untuk Spot Mancing
+local instantInteractEnabled = false
+local interactConnection = nil
+
+local autoFishEnabled = false
+local autoSellEnabled = false
+local autoFavEnabled = false
+local isSelling = false
+local isScanningMemory = false
+local activeRod = nil
+
+local minigameTable = nil
+local isCurrentlyHolding = false
+local lastTapTime = 0
+local HOLD_DELAY   = 0.08  
+local LOWER_BUFFER = 0.045 
+local UPPER_BUFFER = 0.045 
+local TAP_COOLDOWN = 28    
+
+local totalCaught = 0
+local totalFavorited = 0 
+local wasMinigameActive = false
+_G.IsScriptFavoriting = false
+
+-- ==========================================
+-- VARIABEL SISTEM (MONEY MAGNET)
+-- ==========================================
+local magnetEnabled = false
+local moneyKeywords = {"money", "cash", "coin", "dollar", "uang", "koin", "drop", "loot", "gem"}
+local moneyCache = {}
+local magnetCurrentIndex = 1
+
+-- ==========================================
+-- HOOKING: DETEKSI UNFAVORITE MANUAL
+-- ==========================================
+local successHook, errorMsg = pcall(function()
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FireServer" and tostring(self) == "ToggleFavorite" then
+            if not _G.IsScriptFavoriting then
+                local args = {...}
+                local uuid = args[1]
+                if uuid and type(uuid) == "string" and _G.FavoritedFish then
+                    _G.FavoritedFish[uuid] = nil
+                end
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+end)
+
+if not successHook then
+    warn("Executor kamu tidak mendukung Hooking, Auto Re-favorite manual mungkin tidak bekerja.")
+end
+
+-- ==========================================
+-- MEMUAT RAYFIELD UI LIBRARY
+-- ==========================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Pantai Voice Chat (Mobile Optimized)",
+   LoadingTitle = "GOOY HUB",
+   LoadingSubtitle = "By IGOY",
+   ConfigurationSaving = {
+      Enabled = false,
+      FileName = "Script pantai voice"
+   },
+   Discord = {
+      Enabled = false,
+      RememberJoins = true 
+   },
+   KeySystem = false
+})
+
+-- ==========================================
+-- TABS
+-- ==========================================
+local TabFarm = Window:CreateTab("Auto Farm", 4483362458)
+local TabPancingan = Window:CreateTab("Pancingan", 4483362458)
+local TabTeleport = Window:CreateTab("Teleport", 4483362458)
+local TabMisc = Window:CreateTab("Misc", 4483362458)
+
+-- ==========================================
+-- FUNGSI UPDATE STATISTIK
+-- ==========================================
+local StatsParagraph = TabFarm:CreateParagraph({
+    Title = "Statistik Farming",
+    Content = "Total Tangkapan: 0\nTotal Favorit: 0"
+})
+
+local function UpdateStats()
+    StatsParagraph:Set({
+        Title = "Statistik Farming",
+        Content = "Total Tangkapan: " .. tostring(totalCaught) .. "\nTotal Favorit: " .. tostring(totalFavorited)
+    })
+end
+
+-- ==========================================
+-- LOGIKA BANTUAN (ROOT PART & INTERACT & MOBILE TOUCH)
+-- ==========================================
+local function getRootPart()
+    local character = player.Character or player.CharacterAdded:Wait()
+    return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function modifyPrompt(prompt)
+    if prompt:IsA("ProximityPrompt") then
+        if not prompt:GetAttribute("OriginalDuration") then
+            prompt:SetAttribute("OriginalDuration", prompt.HoldDuration)
+        end
+        prompt.HoldDuration = 0
+    end
+end
+
+local function getScreenCenter()
+    local viewport = Camera.ViewportSize
+    return viewport.X / 2, viewport.Y / 2
+end
+
+local function setHoldState(shouldHold)
+    if isCurrentlyHolding ~= shouldHold then
+        isCurrentlyHolding = shouldHold
+        local cx, cy = getScreenCenter()
+        pcall(function()
+            VIM:SendMouseButtonEvent(cx, cy, 0, shouldHold, game, 0)
+        end)
+    end
+end
+
+local function tapScreen()
+    local cx, cy = getScreenCenter()
+    local tapPos = Vector2.new(cx, cy)
+    
+    -- Simulasi sentuhan Touchscreen HP
+    pcall(function()
+        VIM:SendTouchEvent(0, Enum.UserInputState.Begin, tapPos)
+        task.wait(0.15)
+        VIM:SendTouchEvent(0, Enum.UserInputState.End, tapPos)
+    end)
+    -- Simulasi Klik Mouse (Fallback / Emulator)
+    pcall(function()
+        VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+        task.wait(0.15)
+        VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
+    end)
+    -- VirtualUser Fallback
+    pcall(function()
+        VirtualUser:Button1Down(tapPos)
+        task.wait(0.15)
+        VirtualUser:Button1Up(tapPos)
+    end)
+end
+
+-- ==========================================
+-- TAB: PANCINGAN (AUTO EQUIP)
+-- ==========================================
+TabPancingan:CreateSection("Auto Equip Pancingan")
+
+local function EquipRod(rodName)
+    local character = player.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local backpack = player:WaitForChild("Backpack")
+    
+    if humanoid then
+        local tool = backpack:FindFirstChild(rodName) or character:FindFirstChild(rodName)
+        if tool then humanoid:EquipTool(tool) end
+    end
+end
+
+local function UnequipRods()
+    local character = player.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid:UnequipTools() end
+    end
+end
+
+task.spawn(function()
+    while task.wait(1) do
+        if activeRod then
+            local char = player.Character
+            if char and not char:FindFirstChild(activeRod) then EquipRod(activeRod) end
+        end
+    end
+end)
+
+local rodList = {
+    "ZeusRod", "DarkBladeRod", "AngelRod", 
+    "WorldCupRod", "LunarEclipse", "DiamondScytheRod"
+}
+
+for _, rodName in ipairs(rodList) do
+    TabPancingan:CreateToggle({
+        Name = "Equip " .. rodName,
+        CurrentValue = false,
+        Flag = "Equip_" .. rodName,
+        Callback = function(Value)
+            if Value then
+                activeRod = rodName
+                EquipRod(rodName)
+            else
+                if activeRod == rodName then
+                    activeRod = nil
+                    UnequipRods()
+                end
+            end
+        end,
+    })
+end
+
+-- ==========================================
+-- TAB: TELEPORT
+-- ==========================================
+TabTeleport:CreateSection("Lokasi Jual Ikan")
+
+TabTeleport:CreateButton({
+   Name = "Spot Jual",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart then
+            savedPoint1 = rootPart.CFrame
+            Rayfield:Notify({Title = "Sukses", Content = "Spot Jual Ikan berhasil disimpan!", Duration = 3})
+        end
+   end,
+})
+
+TabTeleport:CreateButton({
+   Name = "Teleport ke Spot Jual",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart and savedPoint1 then 
+            rootPart.CFrame = savedPoint1 
+        else
+            Rayfield:Notify({Title = "Gagal", Content = "Spot Jual Ikan belum disimpan!", Duration = 3})
+        end
+   end,
+})
+
+TabTeleport:CreateSection("Lokasi Spot Mancing")
+
+TabTeleport:CreateButton({
+   Name = "Spot Mancing",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart then
+            savedPoint2 = rootPart.CFrame
+            Rayfield:Notify({Title = "Sukses", Content = "Spot Mancing berhasil disimpan!", Duration = 3})
+        end
+   end,
+})
+
+TabTeleport:CreateButton({
+   Name = "Teleport ke Spot Mancing",
+   Callback = function()
+        local rootPart = getRootPart()
+        if rootPart and savedPoint2 then 
+            rootPart.CFrame = savedPoint2 
+        else
+            Rayfield:Notify({Title = "Gagal", Content = "Spot Mancing belum disimpan!", Duration = 3})
+        end
+   end,
+})
+
+-- ==========================================
+-- TAB: MISC (MONEY MAGNET & INSTANT INTERACT)
+-- ==========================================
+TabMisc:CreateToggle({
+   Name = "Instant Interact (Tanpa Tahan E)",
+   CurrentValue = false,
+   Flag = "InstantInteract",
+   Callback = function(Value)
+        instantInteractEnabled = Value
+        if instantInteractEnabled then
+            for _, obj in pairs(workspace:GetDescendants()) do modifyPrompt(obj) end
+            interactConnection = workspace.DescendantAdded:Connect(function(obj) modifyPrompt(obj) end)
+        else
+            if interactConnection then interactConnection:Disconnect(); interactConnection = nil end
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") and obj:GetAttribute("OriginalDuration") then
+                    obj.HoldDuration = obj:GetAttribute("OriginalDuration")
+                end
+            end
+        end
+   end,
+})
+
+TabMisc:CreateToggle({
+   Name = "Ultra-Smooth Money Magnet",
+   CurrentValue = false,
+   Flag = "MoneyMagnetToggle",
+   Callback = function(Value)
+        magnetEnabled = Value
+   end,
+})
+
+-- ==========================================
+-- LOGIKA MONEY MAGNET CACHING & LOOP
+-- ==========================================
+local function isInsidePlayerFast(obj)
+    local ancestor = obj:FindFirstAncestorOfClass("Model")
+    return ancestor and ancestor:FindFirstChild("Humanoid") ~= nil
+end
+
+local function isMoneyPart(obj)
+    if not obj:IsA("BasePart") then return false end
+    if isInsidePlayerFast(obj) then return false end
+    
+    local lname = string.lower(obj.Name)
+    for _, kw in ipairs(moneyKeywords) do
+        if string.find(lname, kw) then
+            return true
+        end
+    end
+    return false
+end
+
+task.spawn(function()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isMoneyPart(obj) then table.insert(moneyCache, obj) end
+    end
+end)
+
+workspace.DescendantAdded:Connect(function(obj)
+    task.delay(0.05, function()
+        if isMoneyPart(obj) then table.insert(moneyCache, obj) end
+    end)
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not magnetEnabled then return end
+    
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if hrp and #moneyCache > 0 then
+        local batchSize = 20
+        local processed = 0
+        
+        while processed < batchSize and #moneyCache > 0 do
+            if magnetCurrentIndex > #moneyCache then magnetCurrentIndex = 1 end
+            
+            local obj = moneyCache[magnetCurrentIndex]
+            
+            if not obj or not obj.Parent or not obj:IsDescendantOf(workspace) then
+                table.remove(moneyCache, magnetCurrentIndex)
+            else
+                local touch = obj:FindFirstChildOfClass("TouchTransmitter") or obj:FindFirstChild("TouchInterest")
+                if touch and firetouchinterest then
+                    firetouchinterest(hrp, obj, 0)
+                    firetouchinterest(hrp, obj, 1)
+                end
+                
+                if not obj.Anchored then obj.CFrame = hrp.CFrame end
+                
+                magnetCurrentIndex = magnetCurrentIndex + 1
+                processed = processed + 1
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- LOGIKA AUTO SELL (1 KLIK)
+-- ==========================================
+local function doAutoSellTask()
+    isSelling = true
+    local rootPart = getRootPart()
+    
+    if rootPart and savedPoint1 then rootPart.CFrame = savedPoint1 end
+    task.wait(6)
+    
+    VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.2)
+    VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+
+    if rootPart then
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") then
+                local dist = (obj.Parent.Position - rootPart.Position).Magnitude
+                if dist <= obj.MaxActivationDistance + 5 then
+                    pcall(function() if fireproximityprompt then fireproximityprompt(obj) end end)
+                end
+            end
+        end
+    end
+
+    task.wait(2)
+    
+    for _, gui in pairs(PlayerGui:GetDescendants()) do
+        if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+            local text = gui:IsA("TextButton") and string.lower(gui.Text) or ""
+            local name = string.lower(gui.Name)
+            
+            if string.find(text, "sell") or string.find(name, "sell") or string.find(text, "jual") then
+                local absPos = gui.AbsolutePosition
+                local absSize = gui.AbsoluteSize
+                local center = absPos + (absSize / 2)
+                
+                for i = 1, 1 do
+                    VIM:SendMouseButtonEvent(center.X, center.Y + 36, 0, true, game, 0)
+                    task.wait(0.03)
+                    VIM:SendMouseButtonEvent(center.X, center.Y + 36, 0, false, game, 0)
+                    task.wait(0.03)
+                end
+                break
+            end
+        end
+    end
+    
+    task.wait(1)
+    
+    if rootPart and savedPoint2 then rootPart.CFrame = savedPoint2 end
+    task.wait(1.5)
+    
+    -- Recast otomatis setelah selesai jual di HP
+    tapScreen()
+    lastTapTime = os.clock()
+    isSelling = false
+end
+
+TabFarm:CreateToggle({
+   Name = "Auto Sell (1 Ikan)",
+   CurrentValue = false,
+   Flag = "AutoSell",
+   Callback = function(Value)
+        if Value then
+            if not savedPoint1 or not savedPoint2 then
+                Rayfield:Notify({Title = "Peringatan", Content = "Set Spot Jual & Mancing Dulu di Tab Teleport!", Duration = 4})
+                autoSellEnabled = false
+                return
+            end
+        end
+        autoSellEnabled = Value
+   end,
+})
+
+-- ==========================================
+-- LOGIKA AUTO FAVORITE (MYTHICAL)
+-- ==========================================
+_G.FavoritedFish = _G.FavoritedFish or {}
+local uuidPattern = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
+
+local function scanMemoryAndFavorite()
+    if not autoFavEnabled or isScanningMemory then return end
+    isScanningMemory = true
+    
+    local success, ToggleFavorite = pcall(function()
+        local invSys = ReplicatedStorage:WaitForChild("InventorySystem", 2)
+        if not invSys then return nil end
+        local invRem = invSys:WaitForChild("InventoryRemotes", 2)
+        if not invRem then return nil end
+        return invRem:WaitForChild("ToggleFavorite", 2)
+    end)
+    
+    if not success or not ToggleFavorite then 
+        isScanningMemory = false
+        return 
+    end
+
+    local tablesScanned = 0
+    local gc = getgc(true)
+
+    for _, tbl in pairs(gc) do
+        if not autoFavEnabled then break end
+        if type(tbl) == "table" then
+            pcall(function()
+                for k, v in pairs(tbl) do
+                    if type(k) == "string" and string.match(k, uuidPattern) and type(v) == "table" then
+                        for _, subV in pairs(v) do
+                            if type(subV) == "string" and string.find(string.lower(subV), "mythical") then
+                                if not _G.FavoritedFish[k] then
+                                    _G.FavoritedFish[k] = true
+                                    _G.IsScriptFavoriting = true
+                                    ToggleFavorite:FireServer(k)
+                                    _G.IsScriptFavoriting = false
+                                    totalFavorited = totalFavorited + 1
+                                    UpdateStats()
+                                end
+                                break
+                            end
+                        end
+                    elseif type(v) == "string" and string.match(v, uuidPattern) then
+                        for _, sibV in pairs(tbl) do
+                            if type(sibV) == "string" and string.find(string.lower(sibV), "mythical") then
+                                if not _G.FavoritedFish[v] then
+                                    _G.FavoritedFish[v] = true
+                                    _G.IsScriptFavoriting = true
+                                    ToggleFavorite:FireServer(v)
+                                    _G.IsScriptFavoriting = false
+                                    totalFavorited = totalFavorited + 1
+                                    UpdateStats()
+                                end
+                                break
+                            end
+                        end
+                    end
+                end
+            end)
+            tablesScanned = tablesScanned + 1
+            if tablesScanned % 150 == 0 then task.wait() end
+        end
+    end
+    isScanningMemory = false
+end
+
+TabFarm:CreateToggle({
+   Name = "Auto Fav (Mythical)",
+   CurrentValue = false,
+   Flag = "AutoFav",
+   Callback = function(Value)
+        autoFavEnabled = Value
+        if autoFavEnabled then
+            _G.FavoritedFish = {} 
+            totalFavorited = 0 
+            UpdateStats()
+            scanMemoryAndFavorite()
+        else
+            isScanningMemory = false
+        end
+   end,
+})
+
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if autoFavEnabled then scanMemoryAndFavorite() end
+    end
+end)
+
+-- ==========================================
+-- LOGIKA AUTO FISH (OPTIMAL MOBILE)
+-- ==========================================
+TabFarm:CreateToggle({
+   Name = "Auto Fish",
+   CurrentValue = false,
+   Flag = "AutoFish",
+   Callback = function(Value)
+        autoFishEnabled = Value
+        if autoFishEnabled then
+            lastTapTime = os.clock() 
+            wasMinigameActive = false
+            task.spawn(tapScreen) -- Lemparan awal pancing saat diaktifkan
+        else
+            setHoldState(false)
+            wasMinigameActive = false
+        end
+   end,
+})
+
+local function getMinigameData()
+    if minigameTable and minigameTable.isGameActive ~= nil then
+        return minigameTable
+    end
+    for _, v in pairs(getgc(true)) do
+        if type(v) == "table" and rawget(v, "isGameActive") ~= nil and rawget(v, "detecSize") ~= nil then
+            minigameTable = v
+            return minigameTable
+        end
+    end
+    return nil
+end
+
+local timer = 0
+RunService.RenderStepped:Connect(function(dt)
+    if not autoFishEnabled then return end
+
+    local data = getMinigameData()
+    local isMinigameCurrentlyPlaying = (data and data.isGameActive and data.Detec and data.Attc)
+
+    if isMinigameCurrentlyPlaying then
+        wasMinigameActive = true
+        timer = timer + dt
+        if timer < HOLD_DELAY then return end
+        timer = 0
+
+        local detecPos = data.Detec.Position.X.Scale + (data.detecSize / 2)
+        local attcPos = data.Attc.Position.X.Scale + (data.attcSize / 2)
+
+        if not isCurrentlyHolding and detecPos < (attcPos - LOWER_BUFFER) then
+            setHoldState(true)
+        elseif isCurrentlyHolding and detecPos > (attcPos + UPPER_BUFFER) then
+            setHoldState(false)
+        end
+    else
+        setHoldState(false)
+
+        -- DETEKSI MINIGAME BARU SAJA SELESAI
+        if wasMinigameActive then
+            wasMinigameActive = false
+            totalCaught = totalCaught + 1
+            UpdateStats()
+            
+            if autoSellEnabled then
+                task.spawn(doAutoSellTask)
+            else
+                -- ALUR MOBILE: Jeda -> Tutup Pop-Up Ikan -> Jeda -> Cast Ulang
+                task.spawn(function()
+                    task.wait(1.5) -- Tunggu animasi pop-up ikan
+                    tapScreen()    -- Tap untuk tutup GUI ikan
+                    
+                    task.wait(1.5) -- Jeda stabil
+                    tapScreen()    -- Tap untuk re-cast pancingan
+                    
+                    lastTapTime = os.clock()
+                end)
+            end
+        end
+
+        if isSelling then return end
+
+        -- TIMEOUT PROTECTION: Lempar ulang jika nganggur (28 detik)
+        if os.clock() - lastTapTime >= TAP_COOLDOWN then
+            lastTapTime = os.clock()
+            task.spawn(tapScreen)
+        end
+    end
+end)
