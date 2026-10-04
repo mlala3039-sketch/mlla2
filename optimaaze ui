@@ -437,7 +437,6 @@ local function doAutoSellTask()
                 local absSize = gui.AbsoluteSize
                 local center = absPos + (absSize / 2)
                 
-                -- PENYESUAIAN TITIK KLIK (DIGESER LEBIH KE KANAN DAN BAWAH)
                 local clickX = center.X + 60
                 local clickY = center.Y + 80
                 
@@ -583,7 +582,7 @@ TabFarm:CreateToggle({
         if autoFishEnabled then
             lastTapTime = os.clock() 
             wasMinigameActive = false
-            task.spawn(tapScreen) -- Lemparan awal pancing saat diaktifkan
+            task.spawn(tapScreen)
         else
             setHoldState(false)
             wasMinigameActive = false
@@ -628,7 +627,6 @@ RunService.RenderStepped:Connect(function(dt)
     else
         setHoldState(false)
 
-        -- DETEKSI MINIGAME BARU SAJA SELESAI
         if wasMinigameActive then
             wasMinigameActive = false
             totalCaught = totalCaught + 1
@@ -637,13 +635,12 @@ RunService.RenderStepped:Connect(function(dt)
             if autoSellEnabled then
                 task.spawn(doAutoSellTask)
             else
-                -- ALUR MOBILE: Jeda -> Tutup Pop-Up Ikan -> Jeda -> Cast Ulang
                 task.spawn(function()
-                    task.wait(1.5) -- Tunggu animasi pop-up ikan
-                    tapScreen()    -- Tap untuk tutup GUI ikan
+                    task.wait(1.5)
+                    tapScreen()
                     
-                    task.wait(1.5) -- Jeda stabil
-                    tapScreen()    -- Tap untuk re-cast pancingan
+                    task.wait(1.5)
+                    tapScreen()
                     
                     lastTapTime = os.clock()
                 end)
@@ -652,7 +649,6 @@ RunService.RenderStepped:Connect(function(dt)
 
         if isSelling then return end
 
-        -- TIMEOUT PROTECTION: Lempar ulang jika nganggur (28 detik)
         if os.clock() - lastTapTime >= TAP_COOLDOWN then
             lastTapTime = os.clock()
             task.spawn(tapScreen)
@@ -661,35 +657,37 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 -- ==========================================
--- FIX MOBILE: MENCEGAH KAMERA TERGESER SAAT DRAG UI
+-- FIX MOBILE SAFE: SANGAT STABIL & TANPA FREEZE
 -- ==========================================
 task.spawn(function()
-    task.wait(3) -- Tunggu 3 detik agar Rayfield selesai di-render sepenuhnya
+    task.wait(2.5) -- Memberi waktu UI merender sempurna
     
-    local function applyMobileDragFix(container)
-        for _, screenGui in pairs(container:GetChildren()) do
-            if screenGui:IsA("ScreenGui") then
-                -- Cari semua elemen UI di dalam ScreenGui
-                for _, element in pairs(screenGui:GetDescendants()) do
-                    -- Jika elemen berupa Frame, Gambar, atau Teks, kita aktifkan penahan sentuhan
-                    if element:IsA("Frame") or element:IsA("ScrollingFrame") or element:IsA("ImageLabel") or element:IsA("TextLabel") then
-                        pcall(function()
-                            element.Active = true -- Ini yang mencegah sentuhan tembus ke kamera
-                        end)
+    local function applySafeDrag(container)
+        for _, gui in ipairs(container:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                for _, child in ipairs(gui:GetChildren()) do
+                    -- Menargetkan langsung Frame UI Rayfield saja
+                    if child:IsA("Frame") and (child.Name == "Main" or child.Name:lower():find("main")) then
+                        child.Active = true
+                        
+                        -- Mengunci bagian Topbar/Bar judul agar sentuhan tidak tembus
+                        local topbar = child:FindFirstChild("Topbar") or child:FindFirstChild("TopBar")
+                        if topbar then
+                            topbar.Active = true
+                        end
+                        
+                        -- Memastikan elemen overlay background dibiarkan pasif
+                        for _, sub in ipairs(child:GetDescendants()) do
+                            if sub:IsA("TextButton") or sub:IsA("ImageButton") then
+                                sub.Active = true
+                            end
+                        end
                     end
                 end
             end
         end
     end
 
-    -- 1. Coba aplikasikan ke CoreGui (Sebagian besar executor mobile menaruh UI di sini)
-    pcall(function()
-        applyMobileDragFix(game:GetService("CoreGui"))
-    end)
-
-    -- 2. Fallback ke PlayerGui jika executor tidak mendukung CoreGui
-    pcall(function()
-        local Players = game:GetService("Players")
-        applyMobileDragFix(Players.LocalPlayer:WaitForChild("PlayerGui"))
-    end)
+    pcall(function() applySafeDrag(game:GetService("CoreGui")) end)
+    pcall(function() applySafeDrag(game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")) end)
 end)
