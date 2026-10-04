@@ -240,7 +240,7 @@ TabTeleport:CreateButton({
 })
 
 -- ==========================================
--- TAB: MISC (MONEY MAGNET & INSTANT INTERACT)
+-- TAB: MISC (LAIN-LAIN)
 -- ==========================================
 TabMisc:CreateToggle({
    Name = "Instant Interact (Tanpa Tahan E)",
@@ -268,6 +268,29 @@ TabMisc:CreateToggle({
    Flag = "MoneyMagnetToggle",
    Callback = function(Value)
         magnetEnabled = Value
+   end,
+})
+
+local antiAfkConnection
+TabMisc:CreateToggle({
+   Name = "Anti AFK",
+   CurrentValue = false,
+   Flag = "AntiAFK",
+   Callback = function(Value)
+        if Value then
+            -- Mencegah sistem mendeteksi AFK setelah 20 menit
+            antiAfkConnection = player.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK telah diaktifkan!", Duration = 3})
+        else
+            if antiAfkConnection then
+                antiAfkConnection:Disconnect()
+                antiAfkConnection = nil
+            end
+            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK dimatikan!", Duration = 3})
+        end
    end,
 })
 
@@ -313,7 +336,7 @@ RunService.RenderStepped:Connect(function()
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     
     if hrp and #moneyCache > 0 then
-        local batchSize = 20 -- SUDAH DIGANTI MENJADI 20
+        local batchSize = 20
         local processed = 0
         
         while processed < batchSize and #moneyCache > 0 do
