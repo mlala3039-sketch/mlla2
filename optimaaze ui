@@ -149,19 +149,16 @@ local function tapScreen()
     local cx, cy = getScreenCenter()
     local tapPos = Vector2.new(cx, cy)
     
-    -- Simulasi sentuhan Touchscreen HP
     pcall(function()
         VIM:SendTouchEvent(0, Enum.UserInputState.Begin, tapPos)
         task.wait(0.15)
         VIM:SendTouchEvent(0, Enum.UserInputState.End, tapPos)
     end)
-    -- Simulasi Klik Mouse (Fallback / Emulator)
     pcall(function()
         VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
         task.wait(0.15)
         VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
     end)
-    -- VirtualUser Fallback
     pcall(function()
         VirtualUser:Button1Down(tapPos)
         task.wait(0.15)
@@ -657,37 +654,51 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 -- ==========================================
--- FIX MOBILE SAFE: SANGAT STABIL & TANPA FREEZE
+-- FIX MOBILE ULTIMATE: KUNCI KAMERA SAAT DRAG UI
 -- ==========================================
 task.spawn(function()
-    task.wait(2.5) -- Memberi waktu UI merender sempurna
+    task.wait(2.5)
     
-    local function applySafeDrag(container)
+    local Camera = workspace.CurrentCamera
+    
+    local function applyCameraLockFix(container)
         for _, gui in ipairs(container:GetChildren()) do
             if gui:IsA("ScreenGui") then
-                for _, child in ipairs(gui:GetChildren()) do
-                    -- Menargetkan langsung Frame UI Rayfield saja
-                    if child:IsA("Frame") and (child.Name == "Main" or child.Name:lower():find("main")) then
-                        child.Active = true
+                for _, main in ipairs(gui:GetChildren()) do
+                    if main:IsA("Frame") and (main.Name == "Main" or main.Name:lower():find("main")) then
                         
-                        -- Mengunci bagian Topbar/Bar judul agar sentuhan tidak tembus
-                        local topbar = child:FindFirstChild("Topbar") or child:FindFirstChild("TopBar")
-                        if topbar then
-                            topbar.Active = true
-                        end
+                        local topbar = main:FindFirstChild("Topbar") or main:FindFirstChild("TopBar") or main
                         
-                        -- Memastikan elemen overlay background dibiarkan pasif
-                        for _, sub in ipairs(child:GetDescendants()) do
-                            if sub:IsA("TextButton") or sub:IsA("ImageButton") then
-                                sub.Active = true
+                        topbar.InputBegan:Connect(function(input)
+                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                                Camera.CameraType = Enum.CameraType.Scriptable
                             end
-                        end
+                        end)
+                        
+                        topbar.InputEnded:Connect(function(input)
+                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                                task.delay(0.1, function()
+                                    Camera.CameraType = Enum.CameraType.Custom
+                                end)
+                            end
+                        end)
+                        
+                        UserInputService.InputEnded:Connect(function(input)
+                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                                if Camera.CameraType == Enum.CameraType.Scriptable then
+                                    task.delay(0.1, function()
+                                        Camera.CameraType = Enum.CameraType.Custom
+                                    end)
+                                end
+                            end
+                        end)
+                        
                     end
                 end
             end
         end
     end
 
-    pcall(function() applySafeDrag(game:GetService("CoreGui")) end)
-    pcall(function() applySafeDrag(game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")) end)
+    pcall(function() applyCameraLockFix(game:GetService("CoreGui")) end)
+    pcall(function() applyCameraLockFix(game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")) end)
 end)
