@@ -35,7 +35,7 @@ local TAP_COOLDOWN = 28
 
 local totalCaught = 0
 local totalFavorited = 0 
-local fishInventoryCount = 0 -- [BARU] Penghitung ikan untuk Auto Sell
+local fishToSellCount = 0 -- Tambahan variabel untuk menghitung batas 200 ikan
 local wasMinigameActive = false
 _G.IsScriptFavoriting = false
 
@@ -104,15 +104,13 @@ local TabMisc = Window:CreateTab("Misc", 4483362458)
 -- ==========================================
 local StatsParagraph = TabFarm:CreateParagraph({
     Title = "Statistik Farming",
-    Content = "Total Tangkapan: 0\nTotal Favorit: 0\nIkan Terkumpul (Jual): 0/200"
+    Content = "Total Tangkapan: 0\nTotal Favorit: 0\nIkan di Tas: 0/200"
 })
 
 local function UpdateStats()
     StatsParagraph:Set({
         Title = "Statistik Farming",
-        Content = "Total Tangkapan: " .. tostring(totalCaught) .. 
-                  "\nTotal Favorit: " .. tostring(totalFavorited) .. 
-                  "\nIkan Terkumpul (Jual): " .. tostring(fishInventoryCount) .. "/200"
+        Content = "Total Tangkapan: " .. tostring(totalCaught) .. "\nTotal Favorit: " .. tostring(totalFavorited) .. "\nIkan di Tas: " .. tostring(fishToSellCount) .. "/200"
     })
 end
 
@@ -152,16 +150,19 @@ local function tapScreen()
     local cx, cy = getScreenCenter()
     local tapPos = Vector2.new(cx, cy)
     
+    -- Simulasi sentuhan Touchscreen HP
     pcall(function()
         VIM:SendTouchEvent(0, Enum.UserInputState.Begin, tapPos)
         task.wait(0.15)
         VIM:SendTouchEvent(0, Enum.UserInputState.End, tapPos)
     end)
+    -- Simulasi Klik Mouse (Fallback / Emulator)
     pcall(function()
         VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
         task.wait(0.15)
         VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
     end)
+    -- VirtualUser Fallback
     pcall(function()
         VirtualUser:Button1Down(tapPos)
         task.wait(0.15)
@@ -437,6 +438,7 @@ local function doAutoSellTask()
                 local absSize = gui.AbsoluteSize
                 local center = absPos + (absSize / 2)
                 
+                -- PENYESUAIAN TITIK KLIK (DIGESER LEBIH KE KANAN DAN BAWAH)
                 local clickX = center.X + 60
                 local clickY = center.Y + 80
                 
@@ -453,6 +455,10 @@ local function doAutoSellTask()
     
     task.wait(1)
     
+    -- Reset hitungan ikan setelah selesai dijual
+    fishToSellCount = 0 
+    UpdateStats()
+    
     if rootPart and savedPoint2 then rootPart.CFrame = savedPoint2 end
     task.wait(1.5)
     
@@ -462,7 +468,7 @@ local function doAutoSellTask()
 end
 
 TabFarm:CreateToggle({
-   Name = "Auto Sell (Tiap 200 Ikan)",
+   Name = "Auto Sell (200 Ikan)",
    CurrentValue = false,
    Flag = "AutoSell",
    Callback = function(Value)
@@ -582,7 +588,7 @@ TabFarm:CreateToggle({
         if autoFishEnabled then
             lastTapTime = os.clock() 
             wasMinigameActive = false
-            task.spawn(tapScreen)
+            task.spawn(tapScreen) -- Lemparan awal pancing saat diaktifkan
         else
             setHoldState(false)
             wasMinigameActive = false
@@ -627,27 +633,24 @@ RunService.RenderStepped:Connect(function(dt)
     else
         setHoldState(false)
 
+        -- DETEKSI MINIGAME BARU SAJA SELESAI
         if wasMinigameActive then
             wasMinigameActive = false
-            
-            -- PENGHITUNG IKAN
             totalCaught = totalCaught + 1
-            fishInventoryCount = fishInventoryCount + 1
+            fishToSellCount = fishToSellCount + 1 -- Tambah jumlah ikan di tas
             UpdateStats()
             
-            -- LOGIKA JUAL IKAN (TIAP 200)
-            if autoSellEnabled and fishInventoryCount >= 200 then
-                fishInventoryCount = 0 -- Reset kembali ke 0 setelah penuh
-                UpdateStats()
+            -- Cek apakah Auto Sell aktif DAN ikan sudah mencapai 200
+            if autoSellEnabled and fishToSellCount >= 200 then
                 task.spawn(doAutoSellTask)
             else
-                -- Jika belum 200 ikan (atau auto sell mati), lempar pancing lagi
+                -- ALUR MOBILE: Jeda -> Tutup Pop-Up Ikan -> Jeda -> Cast Ulang
                 task.spawn(function()
-                    task.wait(1.5)
-                    tapScreen()
+                    task.wait(1.5) -- Tunggu animasi pop-up ikan
+                    tapScreen()    -- Tap untuk tutup GUI ikan
                     
-                    task.wait(1.5)
-                    tapScreen()
+                    task.wait(1.5) -- Jeda stabil
+                    tapScreen()    -- Tap untuk re-cast pancingan
                     
                     lastTapTime = os.clock()
                 end)
@@ -656,59 +659,10 @@ RunService.RenderStepped:Connect(function(dt)
 
         if isSelling then return end
 
+        -- TIMEOUT PROTECTION: Lempar ulang jika nganggur (28 detik)
         if os.clock() - lastTapTime >= TAP_COOLDOWN then
             lastTapTime = os.clock()
             task.spawn(tapScreen)
         end
     end
-end)
-
--- ==========================================
--- FIX MOBILE ULTIMATE: KUNCI KAMERA SAAT DRAG UI
--- ==========================================
-task.spawn(function()
-    task.wait(2.5)
-    
-    local Camera = workspace.CurrentCamera
-    
-    local function applyCameraLockFix(container)
-        for _, gui in ipairs(container:GetChildren()) do
-            if gui:IsA("ScreenGui") then
-                for _, main in ipairs(gui:GetChildren()) do
-                    if main:IsA("Frame") and (main.Name == "Main" or main.Name:lower():find("main")) then
-                        
-                        local topbar = main:FindFirstChild("Topbar") or main:FindFirstChild("TopBar") or main
-                        
-                        topbar.InputBegan:Connect(function(input)
-                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                                Camera.CameraType = Enum.CameraType.Scriptable
-                            end
-                        end)
-                        
-                        topbar.InputEnded:Connect(function(input)
-                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                                task.delay(0.1, function()
-                                    Camera.CameraType = Enum.CameraType.Custom
-                                end)
-                            end
-                        end)
-                        
-                        UserInputService.InputEnded:Connect(function(input)
-                            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                                if Camera.CameraType == Enum.CameraType.Scriptable then
-                                    task.delay(0.1, function()
-                                        Camera.CameraType = Enum.CameraType.Custom
-                                    end)
-                                end
-                            end
-                        end)
-                        
-                    end
-                end
-            end
-        end
-    end
-
-    pcall(function() applyCameraLockFix(game:GetService("CoreGui")) end)
-    pcall(function() applyCameraLockFix(game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")) end)
 end)
