@@ -645,7 +645,7 @@ RunService.RenderStepped:Connect(function(dt)
             fishToSellCount = fishToSellCount + 1
             UpdateStats()
             
-            if autoSellEnabled and fishToSellCount >= 1 then
+            if autoSellEnabled and fishToSellCount >= 150 then
                 task.spawn(doAutoSellTask)
             else
                 task.spawn(function()
