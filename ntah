@@ -4,6 +4,7 @@ local VIM = game:GetService("VirtualInputManager")
 local VirtualUser = game:GetService("VirtualUser")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
 local Camera = workspace.CurrentCamera
 
 local player = Players.LocalPlayer
@@ -35,7 +36,7 @@ local TAP_COOLDOWN = 28
 
 local totalCaught = 0
 local totalFavorited = 0 
-local fishToSellCount = 0 -- Variabel hitung ikan (target: 1 ikan)
+local fishToSellCount = 0 -- Target: 1 ikan
 local wasMinigameActive = false
 _G.IsScriptFavoriting = false
 
@@ -150,19 +151,16 @@ local function tapScreen()
     local cx, cy = getScreenCenter()
     local tapPos = Vector2.new(cx, cy)
     
-    -- Simulasi sentuhan Touchscreen HP
     pcall(function()
         VIM:SendTouchEvent(0, Enum.UserInputState.Begin, tapPos)
         task.wait(0.15)
         VIM:SendTouchEvent(0, Enum.UserInputState.End, tapPos)
     end)
-    -- Simulasi Klik Mouse (Fallback / Emulator)
     pcall(function()
         VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
         task.wait(0.15)
         VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
     end)
-    -- VirtualUser Fallback
     pcall(function()
         VirtualUser:Button1Down(tapPos)
         task.wait(0.15)
@@ -283,7 +281,7 @@ TabTeleport:CreateButton({
 })
 
 -- ==========================================
--- TAB: MISC (MONEY MAGNET, INSTANT INTERACT & ANTI AFK)
+-- TAB: MISC
 -- ==========================================
 TabMisc:CreateToggle({
    Name = "Anti AFK",
@@ -295,7 +293,7 @@ TabMisc:CreateToggle({
                 VirtualUser:CaptureController()
                 VirtualUser:ClickButton2(Vector2.new())
             end)
-            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK Aktif! Anti Kick Idle 20 Menit.", Duration = 3})
+            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK Aktif!", Duration = 3})
         else
             if afkConnection then
                 afkConnection:Disconnect()
@@ -336,7 +334,7 @@ TabMisc:CreateToggle({
 })
 
 -- ==========================================
--- LOGIKA MONEY MAGNET CACHING & LOOP
+-- LOGIKA MONEY MAGNET
 -- ==========================================
 local function isInsidePlayerFast(obj)
     local ancestor = obj:FindFirstAncestorOfClass("Model")
@@ -349,9 +347,7 @@ local function isMoneyPart(obj)
     
     local lname = string.lower(obj.Name)
     for _, kw in ipairs(moneyKeywords) do
-        if string.find(lname, kw) then
-            return true
-        end
+        if string.find(lname, kw) then return true end
     end
     return false
 end
@@ -402,7 +398,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ==========================================
--- LOGIKA AUTO SELL (1 IKAN)
+-- LOGIKA AUTO SELL (TETAP & PRESISI)
 -- ==========================================
 local function doAutoSellTask()
     isSelling = true
@@ -428,26 +424,37 @@ local function doAutoSellTask()
 
     task.wait(2)
     
+    local guiInset = GuiService:GetGuiInset()
+
     for _, gui in pairs(PlayerGui:GetDescendants()) do
-        if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+        if (gui:IsA("TextButton") or gui:IsA("ImageButton")) and gui.Visible then
             local text = gui:IsA("TextButton") and string.lower(gui.Text) or ""
             local name = string.lower(gui.Name)
             
+            -- Mendeteksi tombol "Sell All" / "Sell" / "Jual"
             if string.find(text, "sell") or string.find(name, "sell") or string.find(text, "jual") then
                 local absPos = gui.AbsolutePosition
                 local absSize = gui.AbsoluteSize
-                local center = absPos + (absSize / 2)
                 
-                -- PENYESUAIAN TITIK KLIK (DIGESER KE KIRI DAN KE ATAS)
-                local clickX = center.X - 50
-                local clickY = center.Y - 20
+                -- Posisi persis di tengah tombol
+                local clickX = absPos.X + (absSize.X / 2) + guiInset.X
+                local clickY = absPos.Y + (absSize.Y / 2) + guiInset.Y
                 
-                for i = 1, 1 do
+                -- Klik fisik via VIM
+                for i = 1, 2 do
                     VIM:SendMouseButtonEvent(clickX, clickY, 0, true, game, 0)
-                    task.wait(0.03)
+                    task.wait(0.05)
                     VIM:SendMouseButtonEvent(clickX, clickY, 0, false, game, 0)
-                    task.wait(0.03)
+                    task.wait(0.05)
                 end
+                
+                -- Fallback klik event langsung jika didukung executor
+                pcall(function()
+                    if firesignal then
+                        firesignal(gui.MouseButton1Click)
+                    end
+                end)
+
                 break
             end
         end
@@ -455,7 +462,6 @@ local function doAutoSellTask()
     
     task.wait(1)
     
-    -- Reset hitungan ikan setelah selesai dijual
     fishToSellCount = 0 
     UpdateStats()
     
@@ -577,7 +583,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- LOGIKA AUTO FISH (OPTIMAL MOBILE)
+-- LOGIKA AUTO FISH
 -- ==========================================
 TabFarm:CreateToggle({
    Name = "Auto Fish",
@@ -588,7 +594,7 @@ TabFarm:CreateToggle({
         if autoFishEnabled then
             lastTapTime = os.clock() 
             wasMinigameActive = false
-            task.spawn(tapScreen) -- Lemparan awal pancing saat diaktifkan
+            task.spawn(tapScreen)
         else
             setHoldState(false)
             wasMinigameActive = false
@@ -633,25 +639,20 @@ RunService.RenderStepped:Connect(function(dt)
     else
         setHoldState(false)
 
-        -- DETEKSI MINIGAME BARU SAJA SELESAI
         if wasMinigameActive then
             wasMinigameActive = false
             totalCaught = totalCaught + 1
-            fishToSellCount = fishToSellCount + 1 -- Tambah jumlah ikan di tas
+            fishToSellCount = fishToSellCount + 1
             UpdateStats()
             
-            -- Cek apakah Auto Sell aktif DAN ikan sudah mencapai 1
             if autoSellEnabled and fishToSellCount >= 1 then
                 task.spawn(doAutoSellTask)
             else
-                -- ALUR MOBILE: Jeda -> Tutup Pop-Up Ikan -> Jeda -> Cast Ulang
                 task.spawn(function()
-                    task.wait(1.5) -- Tunggu animasi pop-up ikan
-                    tapScreen()    -- Tap untuk tutup GUI ikan
-                    
-                    task.wait(1.5) -- Jeda stabil
-                    tapScreen()    -- Tap untuk re-cast pancingan
-                    
+                    task.wait(1.5)
+                    tapScreen()
+                    task.wait(1.5)
+                    tapScreen()
                     lastTapTime = os.clock()
                 end)
             end
@@ -659,7 +660,6 @@ RunService.RenderStepped:Connect(function(dt)
 
         if isSelling then return end
 
-        -- TIMEOUT PROTECTION: Lempar ulang jika nganggur (28 detik)
         if os.clock() - lastTapTime >= TAP_COOLDOWN then
             lastTapTime = os.clock()
             task.spawn(tapScreen)
