@@ -474,7 +474,7 @@ local function doAutoSellTask()
 end
 
 TabFarm:CreateToggle({
-   Name = "Auto Sell (1 Ikan)",
+   Name = "Auto Sell (150 Ikan)",
    CurrentValue = false,
    Flag = "AutoSell",
    Callback = function(Value)
