@@ -1,0 +1,120 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VIM = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera = workspace.CurrentCamera
+
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
+
+-- ==========================================
+-- VARIABEL SISTEM (AUTO FARM & LAINNYA)
+-- ==========================================
+local savedPoint1 = nil -- Untuk Jual Ikan
+local savedPoint2 = nil -- Untuk Spot Mancing
+local instantInteractEnabled = false
+local interactConnection = nil
+local afkConnection = nil -- Variabel Anti AFK
+
+local autoFishEnabled = false
+local autoSellEnabled = false
+local autoFavEnabled = false
+local isSelling = false
+local isScanningMemory = false
+local activeRod = nil
+
+local minigameTable = nil
+local isCurrentlyHolding = false
+local lastTapTime = 0
+local HOLD_DELAY   = 0.08  
+local LOWER_BUFFER = 0.045 
+local UPPER_BUFFER = 0.045 
+local TAP_COOLDOWN = 28    
+
+local totalCaught = 0
+local totalFavorited = 0 
+local wasMinigameActive = false
+_G.IsScriptFavoriting = false
+
+-- ==========================================
+-- VARIABEL SISTEM (MONEY MAGNET)
+-- ==========================================
+local magnetEnabled = false
+local moneyKeywords = {"money", "cash", "coin", "dollar", "uang", "koin", "drop", "loot", "gem"}
+local moneyCache = {}
+local magnetCurrentIndex = 1
+
+-- ==========================================
+-- HOOKING: DETEKSI UNFAVORITE MANUAL
+-- ==========================================
+local successHook, errorMsg = pcall(function()
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FireServer" and tostring(self) == "ToggleFavorite" then
+            if not _G.IsScriptFavoriting then
+                local args = {...}
+                local uuid = args[1]
+                if uuid and type(uuid) == "string" and _G.FavoritedFish then
+                    _G.FavoritedFish[uuid] = nil
+                end
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+end)
+
+if not successHook then
+    warn("Executor kamu tidak mendukung Hooking, Auto Re-favorite manual mungkin tidak bekerja.")
+end
+
+-- ==========================================
+-- MEMUAT RAYFIELD UI LIBRARY
+-- ==========================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Pantai Voice Chat (Mobile Optimized)",
+   LoadingTitle = "GOOY HUB",
+   LoadingSubtitle = "By IGOY",
+   ConfigurationSaving = {
+      Enabled = false,
+      FileName = "Script pantai voice"
+   },
+   Discord = {
+      Enabled = false,
+      RememberJoins = true 
+   },
+   KeySystem = false
+})
+
+-- ==========================================
+-- TABS
+-- ==========================================
+local TabFarm = Window:CreateTab("Auto Farm", 4483362458)
+local TabPancingan = Window:CreateTab("Pancingan", 4483362458)
+local TabTeleport = Window:CreateTab("Teleport", 4483362458)
+local TabMisc = Window:CreateTab("Misc", 4483362458)
+
+-- ==========================================
+-- FUNGSI UPDATE STATISTIK
+-- ==========================================
+local StatsParagraph = TabFarm:CreateParagraph({
+    Title = "Statistik Farming",
+    Content = "Total Tangkapan: 0\nTotal Favorit: 0"
+})
+
+local function UpdateStats()
+    StatsParagraph:Set({
+        Title = "Statistik Farming",
+        Content = "Total Tangkapan: " .. tostring(totalCaught) .. "\nTotal Favorit: " .. tostring(totalFavorited)
+    })
+end
+
+-- ==========================================
+-- LOGIKA BANTUAN (ROOT PART & INTERACT & MOBILE TOUCH)
+-- ==========================================
+local function getRootPart()
+    local character = pl
