@@ -1,4 +1,4 @@
--- [[ CUSTOM UI LIBRARY + AUTO MINING + ANTI-ADMIN + CONFIG (FULL SCRIPT FIX) ]] --
+-- [[ CUSTOM UI LIBRARY + AUTO MINING + ANTI-ADMIN + CONFIG (FULL SCRIPT FIX - NO AUTO REF) ]] --
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -44,7 +44,6 @@ local keywordTarget = "Crystal"
 local kecepatanHit = 0.25 
 local jarakBawah = 0.2 
 local jarakAmanPemain = 100
-local autoRefOn6Hits = true
 local filterWarna = true
 
 local farmThread = nil
@@ -76,15 +75,6 @@ local function safeGetCharacter()
         return nil
     end
     return char
-end
-
-local function triggerRef()
-    pcall(function()
-        local adminEvent = ReplicatedStorage:FindFirstChild("Events")
-            and ReplicatedStorage.Events:FindFirstChild("RemoteFunction")
-            and ReplicatedStorage.Events.RemoteFunction:FindFirstChild("AdminCommands")
-        if adminEvent then adminEvent:InvokeServer("CommandUsed", ";ref") end
-    end)
 end
 
 -- ==========================================
@@ -350,12 +340,6 @@ local function startFarming()
                 swingTool()
                 hitCrystal(crystal)
                 hitCount = hitCount + 1
-
-                if autoRefOn6Hits and hitCount >= 8 then
-                    if Notify then Notify({Title = "Auto Ref", Content = "Karakter Nyangkut -> Executed ;ref", Duration = 2}) end
-                    hitCount = 0; currentCrystal = nil; resetCharacterState(); triggerRef(); task.wait(2.5)
-                    continue
-                end
             else
                 currentCrystal = nil; hitCount = 0; resetCharacterState()
             end
@@ -833,9 +817,7 @@ CreateButton(TabMisc, "🔍 Scan Server Sekarang", function()
 end)
 
 CreateSection(TabMisc, "Sistem Tambahan")
-Toggles.AutoRef = CreateToggle(TabMisc, "Auto ;ref (Anti Nyangkut)", true, function(Value) autoRefOn6Hits = Value end)
 Toggles.AntiAFK = CreateToggle(TabMisc, "Anti-AFK System", true, function(Value) setupAntiAFK(Value) end)
-CreateButton(TabMisc, "Refresh Character (;ref)", function() triggerRef() end)
 
 -- TAB 3: CONFIG (SAVE & LOAD)
 local TabConfig = CreateTab("Config")
@@ -847,7 +829,6 @@ local function SaveConfig()
             AutoFarm = Toggles.AutoFarm and Toggles.AutoFarm.Get() or false,
             FilterWarna = Toggles.FilterWarna and Toggles.FilterWarna.Get() or true,
             AntiAdmin = Toggles.AntiAdmin and Toggles.AntiAdmin.Get() or false,
-            AutoRef = Toggles.AutoRef and Toggles.AutoRef.Get() or true,
             AntiAFK = Toggles.AntiAFK and Toggles.AntiAFK.Get() or true,
         }
         writefile(ConfigFile, HttpService:JSONEncode(data))
@@ -868,7 +849,6 @@ local function LoadConfig(isAuto)
             if result.AutoFarm ~= nil and Toggles.AutoFarm then Toggles.AutoFarm.Set(result.AutoFarm, true) end
             if result.FilterWarna ~= nil and Toggles.FilterWarna then Toggles.FilterWarna.Set(result.FilterWarna, true) end
             if result.AntiAdmin ~= nil and Toggles.AntiAdmin then Toggles.AntiAdmin.Set(result.AntiAdmin, true) end
-            if result.AutoRef ~= nil and Toggles.AutoRef then Toggles.AutoRef.Set(result.AutoRef, true) end
             if result.AntiAFK ~= nil and Toggles.AntiAFK then Toggles.AntiAFK.Set(result.AntiAFK, true) end
             
             if not isAuto then Notify({Title = "Config", Content = "Pengaturan berhasil dimuat!", Duration = 3}) end
