@@ -1,0 +1,902 @@
+-- [[ CUSTOM UI LIBRARY + AUTO MINING (FULL FIX) ]] --
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- SETUP ASET & BACKGROUND
+-- ==========================================
+local DECAL_ID = "118723084344414"
+local BACKGROUND_ID = "113760075269332"
+
+local logoAsset = "rbxthumb://type=Asset&id=" .. DECAL_ID .. "&w=420&h=420"
+local bgAsset = "rbxthumb://type=Asset&id=" .. BACKGROUND_ID .. "&w=768&h=432"
+
+-- ==========================================
+-- VARIABEL & LOGIKA AUTO MINING
+-- ==========================================
+_G.AutoFarm = false
+local keywordTarget = "Crystal" 
+local kecepatanHit = 0.25 
+local jarakBawah = 0.2 
+local jarakAmanPemain = 100
+local autoRefOn6Hits = true
+local farmThread = nil
+local noclipConn = nil
+local currentCrystal = nil
+local hitCount = 0
+
+local crystalCache = {}
+local cacheRefreshRate = 3
+
+local filterWarna = true
+local targetWarna = {
+    "yellow", "gold", "yellowish", "warm yellow",
+    "red", "crimson", "ruby", "scarlet", "reddish", "bright red"
+}
+
+local pickaxeKeywords = {"pickaxe", "pick", "cangkul", "mining"}
+local blacklistKeywords = {"rod", "pancing", "fishing", "fish", "bait"}
+
+local miningEvent = ReplicatedStorage:WaitForChild("Events", 5) 
+    and ReplicatedStorage.Events:WaitForChild("RemoteEvent", 5) 
+    and ReplicatedStorage.Events.RemoteEvent:WaitForChild("Pickaxe", 5)
+
+-- ==========================================
+-- FUNGSI PEMBANTU UTAMA
+-- ==========================================
+local function safeGetCharacter()
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChildOfClass("Humanoid") then
+        return nil
+    end
+    return char
+end
+
+local function triggerRef()
+    pcall(function()
+        local adminEvent = ReplicatedStorage:FindFirstChild("Events")
+            and ReplicatedStorage.Events:FindFirstChild("RemoteFunction")
+            and ReplicatedStorage.Events.RemoteFunction:FindFirstChild("AdminCommands")
+        if adminEvent then
+            adminEvent:InvokeServer("CommandUsed", ";ref")
+        end
+    end)
+end
+
+-- ==========================================
+-- SISTEM ANTI-AFK INTEGRATED
+-- ==========================================
+local antiAfkEnabled = true
+local antiAfkConn = nil
+
+local function setupAntiAFK(state)
+    antiAfkEnabled = state
+    if state then
+        if getconnections then
+            for _, conn in pairs(getconnections(LocalPlayer.Idled)) do
+                if conn.Disable then
+                    conn:Disable()
+                end
+            end
+        end
+        
+        if not antiAfkConn then
+            antiAfkConn = LocalPlayer.Idled:Connect(function()
+                if antiAfkEnabled then
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(1, 1))
+                end
+            end)
+        end
+    else
+        if antiAfkConn then
+            antiAfkConn:Disconnect()
+            antiAfkConn = nil
+        end
+    end
+end
+
+setupAntiAFK(true)
+
+task.spawn(function()
+    while true do
+        task.wait(300)
+        if antiAfkEnabled then
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(50, 50))
+            end)
+        end
+    end
+end)
+
+-- ==========================================
+-- LOGIKA PEMBANTU MINING
+-- ==========================================
+local function autoEquipPickaxe()
+    local char = safeGetCharacter()
+    if not char then return nil end
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return nil end
+
+    local function isBlacklisted(itemName)
+        local name = string.lower(itemName)
+        for _, bad in ipairs(blacklistKeywords) do
+            if string.find(name, bad) then return true end
+        end
+        return false
+    end
+
+    local function isPickaxe(item)
+        if not item:IsA("Tool") or isBlacklisted(item.Name) then return false end
+        local name = string.lower(item.Name)
+        for _, key in ipairs(pickaxeKeywords) do
+            if string.find(name, key) then return true end
+        end
+        return false
+    end
+
+    local currentTool = char:FindFirstChildOfClass("Tool")
+    if currentTool then
+        if isPickaxe(currentTool) then
+            return currentTool
+        else
+            humanoid:UnequipTools()
+            task.wait(0.1)
+        end
+    end
+
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if isPickaxe(item) then
+                humanoid:EquipTool(item)
+                task.wait(0.1)
+                return item
+            end
+        end
+    end
+    return nil
+end
+
+local function isPlayerNearby(pos)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local pRoot = player.Character.HumanoidRootPart
+            if (pRoot.Position - pos).Magnitude <= jarakAmanPemain then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function setNoclip(state)
+    if state then
+        if not noclipConn then
+            noclipConn = RunService.Stepped:Connect(function()
+                local char = safeGetCharacter()
+                if char and _G.AutoFarm then
+                    for _, part in pairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    else
+        if noclipConn then
+            noclipConn:Disconnect()
+            noclipConn = nil
+        end
+    end
+end
+
+local function swingTool()
+    local tool = autoEquipPickaxe()
+    if tool then
+        tool:Activate()
+    end
+end
+
+local function checkPartColor(part)
+    if not part:IsA("BasePart") then return false end
+    local colorName = string.lower(part.BrickColor.Name)
+    for _, w in ipairs(targetWarna) do
+        if string.find(colorName, string.lower(w)) then return true end
+    end
+    local r, g, b = part.Color.R, part.Color.G, part.Color.B
+    if r > 0.5 and g > 0.5 and b < 0.4 then return true end
+    if r > 0.5 and g < 0.35 and b < 0.35 then return true end
+    return false
+end
+
+local function isTargetColor(crystal)
+    if not filterWarna then return true end
+    if crystal:IsA("BasePart") then
+        return checkPartColor(crystal)
+    elseif crystal:IsA("Model") then
+        for _, child in pairs(crystal:GetDescendants()) do
+            if child:IsA("BasePart") and checkPartColor(child) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+task.spawn(function()
+    while true do
+        if _G.AutoFarm then
+            local newCache = {}
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if (obj:IsA("BasePart") or obj:IsA("Model")) and not string.find(string.lower(obj.Name), "sell") then
+                    if string.find(string.lower(obj.Name), string.lower(keywordTarget)) then
+                        if isTargetColor(obj) then
+                            table.insert(newCache, obj)
+                        end
+                    end
+                end
+            end
+            crystalCache = newCache
+        end
+        task.wait(cacheRefreshRate)
+    end
+end)
+
+local function getNearestCrystal()
+    local char = safeGetCharacter()
+    if not char then return nil end
+
+    local root = char.HumanoidRootPart
+    local nearest = nil
+    local minDist = math.huge
+
+    for _, obj in ipairs(crystalCache) do
+        if obj and obj.Parent then
+            local pos = obj:GetPivot().Position
+            if pos and not isPlayerNearby(pos) then
+                local dist = (root.Position - pos).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    nearest = obj
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function resetCharacterState()
+    local char = safeGetCharacter()
+    if char then
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if root then root.Anchored = false end
+        if humanoid then humanoid.PlatformStand = false end
+    end
+end
+
+local function lieDownUnderCrystal(crystal)
+    local char = safeGetCharacter()
+    if not char then return end
+    
+    local root = char.HumanoidRootPart
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    
+    humanoid.PlatformStand = true
+    
+    local crystalCF, crystalSize
+    if crystal:IsA("Model") then
+        crystalCF, crystalSize = crystal:GetBoundingBox()
+    else
+        crystalCF = crystal.CFrame
+        crystalSize = crystal.Size
+    end
+    
+    local targetCF = crystalCF * CFrame.new(0, -(crystalSize.Y / 2) - jarakBawah, 0)
+    
+    root.Anchored = false
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+    root.CFrame = targetCF * CFrame.Angles(math.rad(90), 0, 0)
+    
+    task.wait(0.15)
+    root.Anchored = true
+    autoEquipPickaxe()
+end
+
+local function hitCrystal(crystal)
+    if not miningEvent then return end
+    pcall(function()
+        miningEvent:FireServer("Hit", crystal)
+        if crystal:IsA("Model") then
+            for _, child in pairs(crystal:GetDescendants()) do
+                if child:IsA("BasePart") then
+                    miningEvent:FireServer("Hit", child)
+                end
+            end
+        end
+        miningEvent:FireServer("Hit")
+    end)
+end
+
+-- ==========================================
+-- LOGIKA UTAMA FARMING
+-- ==========================================
+local function startFarming()
+    if farmThread then return end
+    farmThread = task.spawn(function()
+        
+        while _G.AutoFarm do
+            local char = safeGetCharacter()
+            if not char then
+                LocalPlayer.CharacterAdded:Wait()
+                task.wait(1)
+                continue
+            end
+
+            if currentCrystal and currentCrystal.Parent then
+                if isPlayerNearby(currentCrystal:GetPivot().Position) then
+                    currentCrystal = nil
+                    hitCount = 0
+                    resetCharacterState()
+                end
+            end
+
+            local crystal = getNearestCrystal()
+            if crystal and crystal.Parent then
+                
+                if currentCrystal ~= crystal then
+                    currentCrystal = crystal
+                    hitCount = 0
+                    lieDownUnderCrystal(crystal)
+                    task.wait(0.2)
+                end
+                
+                char = safeGetCharacter()
+                if char and char:FindFirstChild("HumanoidRootPart") and not char.HumanoidRootPart.Anchored then
+                    lieDownUnderCrystal(crystal)
+                end
+
+                swingTool()
+                hitCrystal(crystal)
+                hitCount = hitCount + 1
+
+                -- Cek jika tersangkut (>8 kali hit tanpa pecah)
+                if autoRefOn6Hits and hitCount >= 8 then
+                    if Notify then
+                        Notify({Title = "Auto Ref", Content = "Karakter Nyangkut -> Executed ;ref", Duration = 2})
+                    end
+                    
+                    hitCount = 0
+                    currentCrystal = nil
+                    resetCharacterState()
+                    triggerRef()
+                    
+                    task.wait(2.5)
+                    continue
+                end
+                
+            else
+                currentCrystal = nil
+                hitCount = 0
+                resetCharacterState()
+            end
+            
+            task.wait(kecepatanHit)
+        end
+        
+        currentCrystal = nil
+        hitCount = 0
+        setNoclip(false)
+        resetCharacterState()
+        farmThread = nil
+    end)
+end
+
+-- ==========================================
+-- INITIALIZE SCREEN GUI UTAMA
+-- ==========================================
+local UI = Instance.new("ScreenGui")
+UI.Name = "CustomUILibrary"
+UI.ResetOnSpawn = false
+
+local function parentUI()
+    local success, _ = pcall(function()
+        if gethui then UI.Parent = gethui() else UI.Parent = CoreGui end
+    end)
+    if not success then UI.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+end
+parentUI()
+
+-- ==========================================
+-- NOTIFICATION SYSTEM
+-- ==========================================
+local NotifContainer = Instance.new("Frame")
+NotifContainer.Name = "NotifContainer"
+NotifContainer.Size = UDim2.new(0, 220, 1, 0)
+NotifContainer.Position = UDim2.new(1, -230, 0, 10)
+NotifContainer.BackgroundTransparency = 1
+NotifContainer.Parent = UI
+
+local NotifLayout = Instance.new("UIListLayout")
+NotifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NotifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+NotifLayout.Padding = UDim.new(0, 6)
+NotifLayout.Parent = NotifContainer
+
+local function Notify(cfg)
+    local titleText = cfg.Title or "Notifikasi"
+    local contentText = cfg.Content or ""
+    local duration = cfg.Duration or 3
+
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, 0, 0, 50)
+    Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    Frame.BackgroundTransparency = 0.1
+    Frame.Parent = NotifContainer
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = Frame
+
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(0, 140, 255)
+    Stroke.Thickness = 1.5
+    Stroke.Parent = Frame
+
+    local TLabel = Instance.new("TextLabel")
+    TLabel.Size = UDim2.new(1, -10, 0, 20)
+    TLabel.Position = UDim2.new(0, 8, 0, 4)
+    TLabel.BackgroundTransparency = 1
+    TLabel.Text = titleText
+    TLabel.TextColor3 = Color3.fromRGB(0, 180, 255)
+    TLabel.Font = Enum.Font.GothamBold
+    TLabel.TextSize = 12
+    TLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TLabel.Parent = Frame
+
+    local CLabel = Instance.new("TextLabel")
+    CLabel.Size = UDim2.new(1, -10, 0, 22)
+    CLabel.Position = UDim2.new(0, 8, 0, 22)
+    CLabel.BackgroundTransparency = 1
+    CLabel.Text = contentText
+    CLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    CLabel.Font = Enum.Font.Gotham
+    CLabel.TextSize = 11
+    CLabel.TextWrapped = true
+    CLabel.TextXAlignment = Enum.TextXAlignment.Left
+    CLabel.Parent = Frame
+
+    task.delay(duration, function()
+        Frame:Destroy()
+    end)
+end
+
+-- ==========================================
+-- FLOATING MINIMIZE ICON
+-- ==========================================
+local FloatingIcon = Instance.new("TextButton")
+FloatingIcon.Name = "FloatingMinimizeIcon"
+FloatingIcon.Size = UDim2.new(0, 65, 0, 65)
+FloatingIcon.Position = UDim2.new(0.05, 0, 0.2, 0)
+FloatingIcon.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+FloatingIcon.Text = ""
+FloatingIcon.Visible = false
+FloatingIcon.Active = true
+FloatingIcon.Parent = UI
+
+local FloatCorner = Instance.new("UICorner")
+FloatCorner.CornerRadius = UDim.new(0, 18)
+FloatCorner.Parent = FloatingIcon
+
+local FloatStroke = Instance.new("UIStroke")
+FloatStroke.Color = Color3.fromRGB(0, 140, 255)
+FloatStroke.Thickness = 3
+FloatStroke.Parent = FloatingIcon
+
+local LogoImg = Instance.new("ImageLabel")
+LogoImg.Size = UDim2.new(1, -8, 1, -8)
+LogoImg.Position = UDim2.new(0, 4, 0, 4)
+LogoImg.BackgroundTransparency = 1
+LogoImg.Image = logoAsset
+LogoImg.Parent = FloatingIcon
+
+local LogoCorner = Instance.new("UICorner")
+LogoCorner.CornerRadius = UDim.new(0, 14)
+LogoCorner.Parent = LogoImg
+
+local dragToggleFI, dragInputFI, dragStartFI, startPosFI
+FloatingIcon.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggleFI = true; dragStartFI = input.Position; startPosFI = FloatingIcon.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInputFI and dragToggleFI then
+        local delta = input.Position - dragStartFI
+        FloatingIcon.Position = UDim2.new(startPosFI.X.Scale, startPosFI.X.Offset + delta.X, startPosFI.Y.Scale, startPosFI.Y.Offset + delta.Y)
+    end
+end)
+FloatingIcon.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInputFI = input
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggleFI = false
+    end
+end)
+
+-- ==========================================
+-- MENU UTAMA (MAIN FRAME)
+-- ==========================================
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 580, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -290, 0.5, -190)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BackgroundTransparency = 1
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = UI
+
+local BgImage = Instance.new("ImageLabel")
+BgImage.Size = UDim2.new(1, 0, 1, 0)
+BgImage.Position = UDim2.new(0, 0, 0, 0)
+BgImage.BackgroundTransparency = 1
+BgImage.Image = bgAsset
+BgImage.ScaleType = Enum.ScaleType.Crop
+BgImage.ImageColor3 = Color3.fromRGB(150, 150, 150)
+BgImage.ZIndex = 0
+BgImage.Parent = MainFrame
+
+local BgCorner = Instance.new("UICorner")
+BgCorner.CornerRadius = UDim.new(0, 10)
+BgCorner.Parent = BgImage
+
+local dragToggleMF, dragInputMF, dragStartMF, startPosMF
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggleMF = true; dragStartMF = input.Position; startPosMF = MainFrame.Position
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInputMF = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInputMF and dragToggleMF then
+        local delta = input.Position - dragStartMF
+        MainFrame.Position = UDim2.new(startPosMF.X.Scale, startPosMF.X.Offset + delta.X, startPosMF.Y.Scale, startPosMF.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggleMF = false
+    end
+end)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -80, 0, 40)
+Title.BackgroundTransparency = 1
+Title.Text = "    Auto Mining Hub | Optimized"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 12
+Title.Parent = MainFrame
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 16
+CloseBtn.Parent = MainFrame
+
+CloseBtn.MouseButton1Click:Connect(function()
+    UI:Destroy()
+end)
+
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+MinimizeBtn.Position = UDim2.new(1, -65, 0, 5)
+MinimizeBtn.BackgroundTransparency = 1
+MinimizeBtn.Text = "-"
+MinimizeBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.TextSize = 22
+MinimizeBtn.Parent = MainFrame
+
+MinimizeBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    FloatingIcon.Visible = true
+end)
+
+FloatingIcon.MouseButton1Click:Connect(function()
+    FloatingIcon.Visible = false
+    MainFrame.Visible = true
+end)
+
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 160, 1, -40)
+Sidebar.Position = UDim2.new(0, 0, 0, 40)
+Sidebar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Sidebar.BackgroundTransparency = 0.35
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = MainFrame
+
+local SidebarCorner = Instance.new("UICorner")
+SidebarCorner.CornerRadius = UDim.new(0, 10)
+SidebarCorner.Parent = Sidebar
+
+local ProfileArea = Instance.new("Frame")
+ProfileArea.Size = UDim2.new(1, 0, 0, 50)
+ProfileArea.Position = UDim2.new(0, 0, 1, -50)
+ProfileArea.BackgroundTransparency = 1
+ProfileArea.Parent = Sidebar
+
+local AvatarImg = Instance.new("ImageLabel")
+AvatarImg.Size = UDim2.new(0, 36, 0, 36)
+AvatarImg.Position = UDim2.new(0, 10, 0, 7)
+AvatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150"
+AvatarImg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+AvatarImg.Parent = ProfileArea
+
+local AvatarCorner = Instance.new("UICorner")
+AvatarCorner.CornerRadius = UDim.new(1, 0)
+AvatarCorner.Parent = AvatarImg
+
+local UsernameLabel = Instance.new("TextLabel")
+UsernameLabel.Size = UDim2.new(0, 100, 0, 36)
+UsernameLabel.Position = UDim2.new(0, 55, 0, 7)
+UsernameLabel.BackgroundTransparency = 1
+UsernameLabel.Text = LocalPlayer.DisplayName
+UsernameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+UsernameLabel.TextXAlignment = Enum.TextXAlignment.Left
+UsernameLabel.Font = Enum.Font.GothamSemibold
+UsernameLabel.TextSize = 13
+UsernameLabel.Parent = ProfileArea
+
+local ContentArea = Instance.new("Frame")
+ContentArea.Size = UDim2.new(1, -170, 1, -50)
+ContentArea.Position = UDim2.new(0, 170, 0, 50)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = MainFrame
+
+-- ==========================================
+-- TAB & UI BUILDER FUNCTIONS
+-- ==========================================
+local tabs = {}
+local tabButtons = {}
+local firstTab = nil
+local yPos = 10
+
+local function switchTab(selectedName)
+    for name, scrollFrame in pairs(tabs) do
+        scrollFrame.Visible = (name == selectedName)
+    end
+    for name, btn in pairs(tabButtons) do
+        btn.TextColor3 = (name == selectedName) and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
+    end
+end
+
+local function CreateTab(tabName)
+    local Scroll = Instance.new("ScrollingFrame")
+    Scroll.Name = tabName .. "Tab"
+    Scroll.Size = UDim2.new(1, 0, 1, 0)
+    Scroll.BackgroundTransparency = 1
+    Scroll.BorderSizePixel = 0
+    Scroll.ScrollBarThickness = 4
+    Scroll.ScrollBarImageColor3 = Color3.fromRGB(0, 140, 255)
+    Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Scroll.Visible = false
+    Scroll.Parent = ContentArea
+
+    local Layout = Instance.new("UIListLayout")
+    Layout.SortOrder = Enum.SortOrder.LayoutOrder
+    Layout.Padding = UDim.new(0, 8)
+    Layout.Parent = Scroll
+
+    local Padding = Instance.new("UIPadding")
+    Padding.PaddingLeft = UDim.new(0, 2)
+    Padding.PaddingRight = UDim.new(0, 8)
+    Padding.PaddingTop = UDim.new(0, 2)
+    Padding.PaddingBottom = UDim.new(0, 10)
+    Padding.Parent = Scroll
+
+    local MenuBtn = Instance.new("TextButton")
+    MenuBtn.Size = UDim2.new(1, -20, 0, 30)
+    MenuBtn.Position = UDim2.new(0, 10, 0, yPos)
+    MenuBtn.BackgroundTransparency = 1
+    MenuBtn.Text = "  " .. tabName
+    MenuBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+    MenuBtn.TextXAlignment = Enum.TextXAlignment.Left
+    MenuBtn.Font = Enum.Font.GothamBold
+    MenuBtn.TextSize = 13
+    MenuBtn.Parent = Sidebar
+
+    tabs[tabName] = Scroll
+    tabButtons[tabName] = MenuBtn
+    yPos = yPos + 36
+
+    MenuBtn.MouseButton1Click:Connect(function()
+        switchTab(tabName)
+    end)
+
+    if not firstTab then 
+        firstTab = tabName 
+        switchTab(firstTab)
+    end
+
+    return Scroll
+end
+
+local function CreateSection(parentScroll, titleText)
+    local SecLabel = Instance.new("TextLabel")
+    SecLabel.Size = UDim2.new(1, 0, 0, 25)
+    SecLabel.BackgroundTransparency = 1
+    SecLabel.Text = titleText
+    SecLabel.TextColor3 = Color3.fromRGB(0, 180, 255)
+    SecLabel.TextXAlignment = Enum.TextXAlignment.Left
+    SecLabel.Font = Enum.Font.GothamBold
+    SecLabel.TextSize = 13
+    SecLabel.Parent = parentScroll
+end
+
+local function CreateToggle(parentScroll, name, defaultState, callback)
+    local TFrame = Instance.new("Frame")
+    TFrame.Size = UDim2.new(1, 0, 0, 42)
+    TFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    TFrame.BackgroundTransparency = 0.4
+    TFrame.Parent = parentScroll
+
+    local TC = Instance.new("UICorner")
+    TC.CornerRadius = UDim.new(0, 6)
+    TC.Parent = TFrame
+
+    local TLabel = Instance.new("TextLabel")
+    TLabel.Size = UDim2.new(1, -65, 1, 0)
+    TLabel.Position = UDim2.new(0, 12, 0, 0)
+    TLabel.BackgroundTransparency = 1
+    TLabel.Text = name
+    TLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TLabel.Font = Enum.Font.Gotham
+    TLabel.TextSize = 13
+    TLabel.Parent = TFrame
+
+    local TButton = Instance.new("TextButton")
+    TButton.Size = UDim2.new(0, 44, 0, 22)
+    TButton.Position = UDim2.new(1, -52, 0.5, -11)
+    TButton.BackgroundColor3 = defaultState and Color3.fromRGB(0, 140, 255) or Color3.fromRGB(40, 40, 40)
+    TButton.Text = ""
+    TButton.Parent = TFrame
+
+    local TBC = Instance.new("UICorner")
+    TBC.CornerRadius = UDim.new(1, 0)
+    TBC.Parent = TButton
+
+    local Indicator = Instance.new("Frame")
+    Indicator.Size = UDim2.new(0, 18, 0, 18)
+    Indicator.Position = defaultState and UDim2.new(1, -20, 0, 2) or UDim2.new(0, 2, 0, 2)
+    Indicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Indicator.Parent = TButton
+
+    local IC = Instance.new("UICorner")
+    IC.CornerRadius = UDim.new(1, 0)
+    IC.Parent = Indicator
+
+    local state = defaultState
+    TButton.MouseButton1Click:Connect(function()
+        state = not state
+        TButton.BackgroundColor3 = state and Color3.fromRGB(0, 140, 255) or Color3.fromRGB(40, 40, 40)
+        Indicator:TweenPosition(state and UDim2.new(1, -20, 0, 2) or UDim2.new(0, 2, 0, 2), "Out", "Quad", 0.15, true)
+        callback(state)
+    end)
+end
+
+local function CreateButton(parentScroll, text, callback)
+    local BFrame = Instance.new("Frame")
+    BFrame.Size = UDim2.new(1, 0, 0, 36)
+    BFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    BFrame.BackgroundTransparency = 0.4
+    BFrame.Parent = parentScroll
+
+    local BC = Instance.new("UICorner")
+    BC.CornerRadius = UDim.new(0, 6)
+    BC.Parent = BFrame
+
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1, 0, 1, 0)
+    Button.BackgroundTransparency = 1
+    Button.Text = text
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.Font = Enum.Font.Gotham
+    Button.TextSize = 13
+    Button.Parent = BFrame
+
+    Button.MouseButton1Click:Connect(function()
+        pcall(callback)
+    end)
+end
+
+-- ==========================================
+-- MEMBUAT TAB TAB UTAMA
+-- ==========================================
+
+-- TAB 1: AUTO MINING
+local TabMining = CreateTab("Auto Mining")
+
+CreateSection(TabMining, "Konfigurasi Mining")
+
+CreateToggle(TabMining, "Auto Farm (Kuning & Merah)", false, function(Value)
+    _G.AutoFarm = Value
+    
+    if _G.AutoFarm then
+        setNoclip(true)
+        startFarming()
+        Notify({Title = "Auto Mining", Content = "Auto Farm Kuning & Merah diaktifkan!", Duration = 3})
+    else
+        setNoclip(false)
+        resetCharacterState()
+        Notify({Title = "Auto Mining", Content = "Auto Farm dimatikan.", Duration = 3})
+    end
+end)
+
+CreateToggle(TabMining, "Filter Warna (Kuning/Merah)", true, function(Value)
+    filterWarna = Value
+    Notify({Title = "Filter Warna", Content = "Status Filter: " .. tostring(Value), Duration = 2})
+end)
+
+-- TAB 2: MISC / ANTI-AFK
+local TabMisc = CreateTab("Misc")
+
+CreateSection(TabMisc, "Auto Refresh Condition")
+
+CreateToggle(TabMisc, "Auto ;ref (Cek Nyangkut Teleport)", true, function(Value)
+    autoRefOn6Hits = Value
+    Notify({Title = "Auto Ref", Content = "Status Auto ;ref Teleport Check: " .. (Value and "Aktif" or "Nonaktif"), Duration = 2})
+end)
+
+CreateSection(TabMisc, "Pengaturan Anti-AFK")
+
+CreateToggle(TabMisc, "Anti-AFK System", true, function(Value)
+    setupAntiAFK(Value)
+    Notify({Title = "Anti-AFK", Content = "Status Anti-AFK: " .. (Value and "Aktif" or "Nonaktif"), Duration = 2})
+end)
+
+CreateSection(TabMisc, "Admin Commands")
+
+CreateButton(TabMisc, "Refresh Character (;ref)", function()
+    triggerRef()
+    Notify({Title = "Misc", Content = "Command ;ref berhasil dijalankan!", Duration = 2})
+end)
+
+-- Shortcut Keybind 'K'
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.K then
+        if MainFrame.Visible then
+            MainFrame.Visible = false
+            FloatingIcon.Visible = true
+        else
+            MainFrame.Visible = true
+            FloatingIcon.Visible = false
+        end
+    end
+end)
