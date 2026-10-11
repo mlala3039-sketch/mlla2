@@ -1,668 +1,1401 @@
+-- ==========================================
+-- NAPOLEON UNIVERSAL HUB (ESP MINING, CLEAR CRYSTAL RESTORED, AUTO FARM REMOVED)
+-- ==========================================
+
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local VIM = game:GetService("VirtualInputManager")
-local VirtualUser = game:GetService("VirtualUser")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local GuiService = game:GetService("GuiService")
-local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 
-local player = Players.LocalPlayer
-local PlayerGui = player:WaitForChild("PlayerGui")
-
--- ==========================================
--- VARIABEL SISTEM (AUTO FARM & LAINNYA)
--- ==========================================
-local savedPoint1 = nil -- Untuk Jual Ikan
-local savedPoint2 = nil -- Untuk Spot Mancing
-local instantInteractEnabled = false
-local interactConnection = nil
-local afkConnection = nil -- Variabel Anti AFK
-
-local autoFishEnabled = false
-local autoSellEnabled = false
-local autoFavEnabled = false
-local isSelling = false
-local isScanningMemory = false
-local activeRod = nil
-
-local minigameTable = nil
-local isCurrentlyHolding = false
-local lastTapTime = 0
-local HOLD_DELAY   = 0.08  
-local LOWER_BUFFER = 0.045 
-local UPPER_BUFFER = 0.045 
-local TAP_COOLDOWN = 28    
-
-local totalCaught = 0
-local totalFavorited = 0 
-local fishToSellCount = 0 -- Target: 1 ikan
-local wasMinigameActive = false
-_G.IsScriptFavoriting = false
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ==========================================
--- VARIABEL SISTEM (MONEY MAGNET)
+-- SAFE DATA & REMOTE FETCHING
 -- ==========================================
-local magnetEnabled = false
-local moneyKeywords = {"money", "cash", "coin", "dollar", "uang", "koin", "drop", "loot", "gem"}
-local moneyCache = {}
-local magnetCurrentIndex = 1
+local MeteorRemotes = ReplicatedStorage:WaitForChild("MeteorRemotes", 3)
+local ImpactPos = MeteorRemotes and MeteorRemotes:WaitForChild("ImpactPos", 3)
 
--- ==========================================
--- HOOKING: DETEKSI UNFAVORITE MANUAL
--- ==========================================
-local successHook, errorMsg = pcall(function()
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
-        if method == "FireServer" and tostring(self) == "ToggleFavorite" then
-            if not _G.IsScriptFavoriting then
-                local args = {...}
-                local uuid = args[1]
-                if uuid and type(uuid) == "string" and _G.FavoritedFish then
-                    _G.FavoritedFish[uuid] = nil
-                end
-            end
-        end
-        return oldNamecall(self, ...)
-    end)
-end)
+local WeatherRemotes = ReplicatedStorage:WaitForChild("WeatherRemotes", 3)
+local WeatherState = WeatherRemotes and WeatherRemotes:WaitForChild("State", 3)
 
-if not successHook then
-    warn("Executor kamu tidak mendukung Hooking, Auto Re-favorite manual mungkin tidak bekerja.")
-end
-
--- ==========================================
--- MEMUAT RAYFIELD UI LIBRARY
--- ==========================================
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-local Window = Rayfield:CreateWindow({
-   Name = "Pantai Voice Chat (Mobile Optimized)",
-   LoadingTitle = "GOOY HUB",
-   LoadingSubtitle = "By IGOY",
-   ConfigurationSaving = {
-      Enabled = false,
-      FileName = "Script pantai voice"
-   },
-   Discord = {
-      Enabled = false,
-      RememberJoins = true 
-   },
-   KeySystem = false
-})
-
--- ==========================================
--- TABS
--- ==========================================
-local TabFarm = Window:CreateTab("Auto Farm", 4483362458)
-local TabPancingan = Window:CreateTab("Pancingan", 4483362458)
-local TabTeleport = Window:CreateTab("Teleport", 4483362458)
-local TabMisc = Window:CreateTab("Misc", 4483362458)
-
--- ==========================================
--- FUNGSI UPDATE STATISTIK
--- ==========================================
-local StatsParagraph = TabFarm:CreateParagraph({
-    Title = "Statistik Farming",
-    Content = "Total Tangkapan: 0\nTotal Favorit: 0\nIkan di Tas: 0/1"
-})
-
-local function UpdateStats()
-    StatsParagraph:Set({
-        Title = "Statistik Farming",
-        Content = "Total Tangkapan: " .. tostring(totalCaught) .. "\nTotal Favorit: " .. tostring(totalFavorited) .. "\nIkan di Tas: " .. tostring(fishToSellCount) .. "/1"
-    })
-end
-
--- ==========================================
--- LOGIKA BANTUAN (ROOT PART & INTERACT & MOBILE TOUCH)
--- ==========================================
-local function getRootPart()
-    local character = player.Character or player.CharacterAdded:Wait()
-    return character:FindFirstChild("HumanoidRootPart")
-end
-
-local function modifyPrompt(prompt)
-    if prompt:IsA("ProximityPrompt") then
-        if not prompt:GetAttribute("OriginalDuration") then
-            prompt:SetAttribute("OriginalDuration", prompt.HoldDuration)
-        end
-        prompt.HoldDuration = 0
-    end
-end
-
-local function getScreenCenter()
-    local viewport = Camera.ViewportSize
-    return viewport.X / 2, viewport.Y / 2
-end
-
-local function setHoldState(shouldHold)
-    if isCurrentlyHolding ~= shouldHold then
-        isCurrentlyHolding = shouldHold
-        local cx, cy = getScreenCenter()
-        pcall(function()
-            VIM:SendMouseButtonEvent(cx, cy, 0, shouldHold, game, 0)
-        end)
-    end
-end
-
-local function tapScreen()
-    local cx, cy = getScreenCenter()
-    local tapPos = Vector2.new(cx, cy)
-    
-    pcall(function()
-        VIM:SendTouchEvent(0, Enum.UserInputState.Begin, tapPos)
-        task.wait(0.15)
-        VIM:SendTouchEvent(0, Enum.UserInputState.End, tapPos)
-    end)
-    pcall(function()
-        VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
-        task.wait(0.15)
-        VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
-    end)
-    pcall(function()
-        VirtualUser:Button1Down(tapPos)
-        task.wait(0.15)
-        VirtualUser:Button1Up(tapPos)
-    end)
-end
-
--- ==========================================
--- TAB: PANCINGAN (AUTO EQUIP)
--- ==========================================
-TabPancingan:CreateSection("Auto Equip Pancingan")
-
-local function EquipRod(rodName)
-    local character = player.Character
-    if not character then return end
-    
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local backpack = player:WaitForChild("Backpack")
-    
-    if humanoid then
-        local tool = backpack:FindFirstChild(rodName) or character:FindFirstChild(rodName)
-        if tool then humanoid:EquipTool(tool) end
-    end
-end
-
-local function UnequipRods()
-    local character = player.Character
-    if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid:UnequipTools() end
-    end
-end
-
-task.spawn(function()
-    while task.wait(1) do
-        if activeRod then
-            local char = player.Character
-            if char and not char:FindFirstChild(activeRod) then EquipRod(activeRod) end
-        end
-    end
-end)
-
-local rodList = {
-    "ZeusRod", "DarkBladeRod", "AngelRod", 
-    "WorldCupRod", "LunarEclipse", "DiamondScytheRod"
+local TargetWeathers = {
+    ["Blizzard"] = true,
+    ["Lucky"] = true,
+    ["Bloodborne"] = true
 }
 
-for _, rodName in ipairs(rodList) do
-    TabPancingan:CreateToggle({
-        Name = "Equip " .. rodName,
-        CurrentValue = false,
-        Flag = "Equip_" .. rodName,
-        Callback = function(Value)
-            if Value then
-                activeRod = rodName
-                EquipRod(rodName)
-            else
-                if activeRod == rodName then
-                    activeRod = nil
-                    UnequipRods()
-                end
-            end
-        end,
-    })
-end
+-- Asset UI Configuration
+local DECAL_ID = "118723084344414"
+local BACKGROUND_ID = "113760075269332"
+local logoAsset = "rbxthumb://type=Asset&id=" .. DECAL_ID .. "&w=420&h=420"
+local bgAsset = "rbxthumb://type=Asset&id=" .. BACKGROUND_ID .. "&w=768&h=432"
 
--- ==========================================
--- TAB: TELEPORT
--- ==========================================
-TabTeleport:CreateSection("Lokasi Jual Ikan")
+-- ScreenGui Initialization
+local UI = Instance.new("ScreenGui")
+UI.Name = "NapoleonUniversalHub"
+UI.ResetOnSpawn = false
 
-TabTeleport:CreateButton({
-   Name = "Spot Jual",
-   Callback = function()
-        local rootPart = getRootPart()
-        if rootPart then
-            savedPoint1 = rootPart.CFrame
-            Rayfield:Notify({Title = "Sukses", Content = "Spot Jual Ikan berhasil disimpan!", Duration = 3})
-        end
-   end,
-})
-
-TabTeleport:CreateButton({
-   Name = "Teleport ke Spot Jual",
-   Callback = function()
-        local rootPart = getRootPart()
-        if rootPart and savedPoint1 then 
-            rootPart.CFrame = savedPoint1 
-        else
-            Rayfield:Notify({Title = "Gagal", Content = "Spot Jual Ikan belum disimpan!", Duration = 3})
-        end
-   end,
-})
-
-TabTeleport:CreateSection("Lokasi Spot Mancing")
-
-TabTeleport:CreateButton({
-   Name = "Spot Mancing",
-   Callback = function()
-        local rootPart = getRootPart()
-        if rootPart then
-            savedPoint2 = rootPart.CFrame
-            Rayfield:Notify({Title = "Sukses", Content = "Spot Mancing berhasil disimpan!", Duration = 3})
-        end
-   end,
-})
-
-TabTeleport:CreateButton({
-   Name = "Teleport ke Spot Mancing",
-   Callback = function()
-        local rootPart = getRootPart()
-        if rootPart and savedPoint2 then 
-            rootPart.CFrame = savedPoint2 
-        else
-            Rayfield:Notify({Title = "Gagal", Content = "Spot Mancing belum disimpan!", Duration = 3})
-        end
-   end,
-})
-
--- ==========================================
--- TAB: MISC
--- ==========================================
-TabMisc:CreateToggle({
-   Name = "Anti AFK",
-   CurrentValue = false,
-   Flag = "AntiAFK",
-   Callback = function(Value)
-        if Value then
-            afkConnection = player.Idled:Connect(function()
-                VirtualUser:CaptureController()
-                VirtualUser:ClickButton2(Vector2.new())
-            end)
-            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK Aktif!", Duration = 3})
-        else
-            if afkConnection then
-                afkConnection:Disconnect()
-                afkConnection = nil
-            end
-            Rayfield:Notify({Title = "Anti AFK", Content = "Anti AFK Dimatikan.", Duration = 3})
-        end
-   end,
-})
-
-TabMisc:CreateToggle({
-   Name = "Instant Interact (Tanpa Tahan E)",
-   CurrentValue = false,
-   Flag = "InstantInteract",
-   Callback = function(Value)
-        instantInteractEnabled = Value
-        if instantInteractEnabled then
-            for _, obj in pairs(workspace:GetDescendants()) do modifyPrompt(obj) end
-            interactConnection = workspace.DescendantAdded:Connect(function(obj) modifyPrompt(obj) end)
-        else
-            if interactConnection then interactConnection:Disconnect(); interactConnection = nil end
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("ProximityPrompt") and obj:GetAttribute("OriginalDuration") then
-                    obj.HoldDuration = obj:GetAttribute("OriginalDuration")
-                end
-            end
-        end
-   end,
-})
-
-TabMisc:CreateToggle({
-   Name = "Ultra-Smooth Money Magnet",
-   CurrentValue = false,
-   Flag = "MoneyMagnetToggle",
-   Callback = function(Value)
-        magnetEnabled = Value
-   end,
-})
-
--- ==========================================
--- LOGIKA MONEY MAGNET
--- ==========================================
-local function isInsidePlayerFast(obj)
-    local ancestor = obj:FindFirstAncestorOfClass("Model")
-    return ancestor and ancestor:FindFirstChild("Humanoid") ~= nil
-end
-
-local function isMoneyPart(obj)
-    if not obj:IsA("BasePart") then return false end
-    if isInsidePlayerFast(obj) then return false end
-    
-    local lname = string.lower(obj.Name)
-    for _, kw in ipairs(moneyKeywords) do
-        if string.find(lname, kw) then return true end
-    end
-    return false
-end
-
-task.spawn(function()
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if isMoneyPart(obj) then table.insert(moneyCache, obj) end
+pcall(function()
+    if gethui then 
+        UI.Parent = gethui() 
+    else 
+        UI.Parent = game:GetService("CoreGui") 
     end
 end)
+if not UI.Parent then 
+    UI.Parent = PlayerGui 
+end
 
-workspace.DescendantAdded:Connect(function(obj)
-    task.delay(0.05, function()
-        if isMoneyPart(obj) then table.insert(moneyCache, obj) end
-    end)
-end)
-
-RunService.RenderStepped:Connect(function()
-    if not magnetEnabled then return end
-    
-    local char = player.Character
+-- ==========================================
+-- SMOOTH TELEPORT (ANTI-DETECTION SPEED)
+-- ==========================================
+local function smoothTeleport(targetCFrame)
+    local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    
-    if hrp and #moneyCache > 0 then
-        local batchSize = 20
-        local processed = 0
+    if hrp then
+        local distance = (hrp.Position - targetCFrame.Position).Magnitude
+        local speed = 150
+        local duration = math.clamp(distance / speed, 0.2, 5)
         
-        while processed < batchSize and #moneyCache > 0 do
-            if magnetCurrentIndex > #moneyCache then magnetCurrentIndex = 1 end
-            
-            local obj = moneyCache[magnetCurrentIndex]
-            
-            if not obj or not obj.Parent or not obj:IsDescendantOf(workspace) then
-                table.remove(moneyCache, magnetCurrentIndex)
-            else
-                local touch = obj:FindFirstChildOfClass("TouchTransmitter") or obj:FindFirstChild("TouchInterest")
-                if touch and firetouchinterest then
-                    firetouchinterest(hrp, obj, 0)
-                    firetouchinterest(hrp, obj, 1)
-                end
-                
-                if not obj.Anchored then obj.CFrame = hrp.CFrame end
-                
-                magnetCurrentIndex = magnetCurrentIndex + 1
-                processed = processed + 1
-            end
-        end
+        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+        tween:Play()
+        task.wait(duration + 0.1)
     end
-end)
-
--- ==========================================
--- LOGIKA AUTO SELL (TETAP & PRESISI)
--- ==========================================
-local function doAutoSellTask()
-    isSelling = true
-    local rootPart = getRootPart()
-    
-    if rootPart and savedPoint1 then rootPart.CFrame = savedPoint1 end
-    task.wait(6)
-    
-    VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-    task.wait(0.2)
-    VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-
-    if rootPart then
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") then
-                local dist = (obj.Parent.Position - rootPart.Position).Magnitude
-                if dist <= obj.MaxActivationDistance + 5 then
-                    pcall(function() if fireproximityprompt then fireproximityprompt(obj) end end)
-                end
-            end
-        end
-    end
-
-    task.wait(2)
-    
-    local guiInset = GuiService:GetGuiInset()
-
-    for _, gui in pairs(PlayerGui:GetDescendants()) do
-        if (gui:IsA("TextButton") or gui:IsA("ImageButton")) and gui.Visible then
-            local text = gui:IsA("TextButton") and string.lower(gui.Text) or ""
-            local name = string.lower(gui.Name)
-            
-            -- Mendeteksi tombol "Sell All" / "Sell" / "Jual"
-            if string.find(text, "sell") or string.find(name, "sell") or string.find(text, "jual") then
-                local absPos = gui.AbsolutePosition
-                local absSize = gui.AbsoluteSize
-                
-                -- Posisi persis di tengah tombol
-                local clickX = absPos.X + (absSize.X / 2) + guiInset.X
-                local clickY = absPos.Y + (absSize.Y / 2) + guiInset.Y
-                
-                -- Klik fisik via VIM
-                for i = 1, 2 do
-                    VIM:SendMouseButtonEvent(clickX, clickY, 0, true, game, 0)
-                    task.wait(0.05)
-                    VIM:SendMouseButtonEvent(clickX, clickY, 0, false, game, 0)
-                    task.wait(0.05)
-                end
-                
-                -- Fallback klik event langsung jika didukung executor
-                pcall(function()
-                    if firesignal then
-                        firesignal(gui.MouseButton1Click)
-                    end
-                end)
-
-                break
-            end
-        end
-    end
-    
-    task.wait(1)
-    
-    fishToSellCount = 0 
-    UpdateStats()
-    
-    if rootPart and savedPoint2 then rootPart.CFrame = savedPoint2 end
-    task.wait(1.5)
-    
-    tapScreen()
-    lastTapTime = os.clock()
-    isSelling = false
 end
 
-TabFarm:CreateToggle({
-   Name = "Auto Sell (150 Ikan)",
-   CurrentValue = false,
-   Flag = "AutoSell",
-   Callback = function(Value)
-        if Value then
-            if not savedPoint1 or not savedPoint2 then
-                Rayfield:Notify({Title = "Peringatan", Content = "Set Spot Jual & Mancing Dulu di Tab Teleport!", Duration = 4})
-                autoSellEnabled = false
-                return
-            end
-        end
-        autoSellEnabled = Value
-   end,
-})
-
 -- ==========================================
--- LOGIKA AUTO FAVORITE (MYTHICAL)
+-- NOTIFICATION SYSTEM
 -- ==========================================
-_G.FavoritedFish = _G.FavoritedFish or {}
-local uuidPattern = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
+local NotifContainer = Instance.new("Frame")
+NotifContainer.Size = UDim2.new(0, 220, 1, 0)
+NotifContainer.Position = UDim2.new(1, -230, 0, 10)
+NotifContainer.BackgroundTransparency = 1
+NotifContainer.Parent = UI
 
-local function scanMemoryAndFavorite()
-    if not autoFavEnabled or isScanningMemory then return end
-    isScanningMemory = true
-    
-    local success, ToggleFavorite = pcall(function()
-        local invSys = ReplicatedStorage:WaitForChild("InventorySystem", 2)
-        if not invSys then return nil end
-        local invRem = invSys:WaitForChild("InventoryRemotes", 2)
-        if not invRem then return nil end
-        return invRem:WaitForChild("ToggleFavorite", 2)
+local NotifLayout = Instance.new("UIListLayout")
+NotifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NotifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+NotifLayout.Padding = UDim.new(0, 6)
+NotifLayout.Parent = NotifContainer
+
+local function Notify(cfg)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, 0, 0, 50)
+    Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    Frame.BackgroundTransparency = 0.1
+    Frame.Parent = NotifContainer
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = Frame
+
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(0, 140, 255)
+    Stroke.Thickness = 1.5
+    Stroke.Parent = Frame
+
+    local TLabel = Instance.new("TextLabel")
+    TLabel.Size = UDim2.new(1, -10, 0, 20)
+    TLabel.Position = UDim2.new(0, 8, 0, 4)
+    TLabel.BackgroundTransparency = 1
+    TLabel.Text = cfg.Title or "Notifikasi"
+    TLabel.TextColor3 = Color3.fromRGB(0, 180, 255)
+    TLabel.Font = Enum.Font.GothamBold
+    TLabel.TextSize = 12
+    TLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TLabel.Parent = Frame
+
+    local CLabel = Instance.new("TextLabel")
+    CLabel.Size = UDim2.new(1, -10, 0, 22)
+    CLabel.Position = UDim2.new(0, 8, 0, 22)
+    CLabel.BackgroundTransparency = 1
+    CLabel.Text = cfg.Content or ""
+    CLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    CLabel.Font = Enum.Font.Gotham
+    CLabel.TextSize = 11
+    CLabel.TextXAlignment = Enum.TextXAlignment.Left
+    CLabel.Parent = Frame
+
+    task.delay(cfg.Duration or 3, function()
+        Frame:Destroy()
     end)
-    
-    if not success or not ToggleFavorite then 
-        isScanningMemory = false
-        return 
-    end
-
-    local tablesScanned = 0
-    local gc = getgc(true)
-
-    for _, tbl in pairs(gc) do
-        if not autoFavEnabled then break end
-        if type(tbl) == "table" then
-            pcall(function()
-                for k, v in pairs(tbl) do
-                    if type(k) == "string" and string.match(k, uuidPattern) and type(v) == "table" then
-                        for _, subV in pairs(v) do
-                            if type(subV) == "string" and string.find(string.lower(subV), "mythical") then
-                                if not _G.FavoritedFish[k] then
-                                    _G.FavoritedFish[k] = true
-                                    _G.IsScriptFavoriting = true
-                                    ToggleFavorite:FireServer(k)
-                                    _G.IsScriptFavoriting = false
-                                    totalFavorited = totalFavorited + 1
-                                    UpdateStats()
-                                end
-                                break
-                            end
-                        end
-                    elseif type(v) == "string" and string.match(v, uuidPattern) then
-                        for _, sibV in pairs(tbl) do
-                            if type(sibV) == "string" and string.find(string.lower(sibV), "mythical") then
-                                if not _G.FavoritedFish[v] then
-                                    _G.FavoritedFish[v] = true
-                                    _G.IsScriptFavoriting = true
-                                    ToggleFavorite:FireServer(v)
-                                    _G.IsScriptFavoriting = false
-                                    totalFavorited = totalFavorited + 1
-                                    UpdateStats()
-                                end
-                                break
-                            end
-                        end
-                    end
-                end
-            end)
-            tablesScanned = tablesScanned + 1
-            if tablesScanned % 150 == 0 then task.wait() end
-        end
-    end
-    isScanningMemory = false
 end
 
-TabFarm:CreateToggle({
-   Name = "Auto Fav (Mythical)",
-   CurrentValue = false,
-   Flag = "AutoFav",
-   Callback = function(Value)
-        autoFavEnabled = Value
-        if autoFavEnabled then
-            _G.FavoritedFish = {} 
-            totalFavorited = 0 
-            UpdateStats()
-            scanMemoryAndFavorite()
-        else
-            isScanningMemory = false
-        end
-   end,
-})
+-- ==========================================
+-- FLOATING MINIMIZE ICON & MAIN FRAME
+-- ==========================================
+local FloatingIcon = Instance.new("TextButton")
+FloatingIcon.Size = UDim2.new(0, 65, 0, 65)
+FloatingIcon.Position = UDim2.new(0.05, 0, 0.2, 0)
+FloatingIcon.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+FloatingIcon.Text = ""
+FloatingIcon.Visible = false
+FloatingIcon.Active = true
+FloatingIcon.Parent = UI
 
-task.spawn(function()
-    while true do
-        task.wait(5)
-        if autoFavEnabled then scanMemoryAndFavorite() end
+local FloatCorner = Instance.new("UICorner")
+FloatCorner.CornerRadius = UDim.new(0, 18)
+FloatCorner.Parent = FloatingIcon
+
+local FloatStroke = Instance.new("UIStroke")
+FloatStroke.Color = Color3.fromRGB(0, 140, 255)
+FloatStroke.Thickness = 3
+FloatStroke.Parent = FloatingIcon
+
+local LogoImg = Instance.new("ImageLabel")
+LogoImg.Size = UDim2.new(1, -8, 1, -8)
+LogoImg.Position = UDim2.new(0, 4, 0, 4)
+LogoImg.BackgroundTransparency = 1
+LogoImg.Image = logoAsset
+LogoImg.Parent = FloatingIcon
+
+local LogoCorner = Instance.new("UICorner")
+LogoCorner.CornerRadius = UDim.new(0, 14)
+LogoCorner.Parent = LogoImg
+
+local dragToggle, dragInput, dragStart, startPos
+FloatingIcon.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggle = true; dragStart = input.Position; startPos = FloatingIcon.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragToggle then
+        local delta = input.Position - dragStart
+        FloatingIcon.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+FloatingIcon.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggle = false
+    end
+end)
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 580, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -290, 0.5, -190)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BackgroundTransparency = 1
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = UI
+
+local BgImage = Instance.new("ImageLabel")
+BgImage.Size = UDim2.new(1, 0, 1, 0)
+BgImage.BackgroundTransparency = 1
+BgImage.Image = bgAsset
+BgImage.ScaleType = Enum.ScaleType.Crop
+BgImage.ImageColor3 = Color3.fromRGB(150, 150, 150)
+BgImage.ZIndex = 0
+BgImage.Parent = MainFrame
+
+local BgCorner = Instance.new("UICorner")
+BgCorner.CornerRadius = UDim.new(0, 10)
+BgCorner.Parent = BgImage
+
+local dragToggleMF, dragInputMF, dragStartMF, startPosMF
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggleMF = true; dragStartMF = input.Position; startPosMF = MainFrame.Position
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInputMF = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInputMF and dragToggleMF then
+        local delta = input.Position - dragStartMF
+        MainFrame.Position = UDim2.new(startPosMF.X.Scale, startPosMF.X.Offset + delta.X, startPosMF.Y.Scale, startPosMF.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggleMF = false
+    end
+end)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -80, 0, 40)
+Title.BackgroundTransparency = 1
+Title.Text = "    Napoleon Universal Hub"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 12
+Title.Parent = MainFrame
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 16
+CloseBtn.Parent = MainFrame
+CloseBtn.MouseButton1Click:Connect(function() UI:Destroy() end)
+
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+MinimizeBtn.Position = UDim2.new(1, -65, 0, 5)
+MinimizeBtn.BackgroundTransparency = 1
+MinimizeBtn.Text = "-"
+MinimizeBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.TextSize = 22
+MinimizeBtn.Parent = MainFrame
+MinimizeBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    FloatingIcon.Visible = true
+end)
+FloatingIcon.MouseButton1Click:Connect(function()
+    FloatingIcon.Visible = false
+    MainFrame.Visible = true
+end)
+
+-- ==========================================
+-- SIDEBAR BISA DI-SCROLL
+-- ==========================================
+local Sidebar = Instance.new("ScrollingFrame")
+Sidebar.Size = UDim2.new(0, 160, 1, -40)
+Sidebar.Position = UDim2.new(0, 0, 0, 40)
+Sidebar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Sidebar.BackgroundTransparency = 0.35
+Sidebar.BorderSizePixel = 0
+Sidebar.ScrollBarThickness = 3
+Sidebar.ScrollBarImageColor3 = Color3.fromRGB(0, 140, 255)
+Sidebar.CanvasSize = UDim2.new(0, 0, 0, 0)
+Sidebar.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Sidebar.Parent = MainFrame
+
+local SidebarCorner = Instance.new("UICorner")
+SidebarCorner.CornerRadius = UDim.new(0, 10)
+SidebarCorner.Parent = Sidebar
+
+local SidebarLayout = Instance.new("UIListLayout")
+SidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SidebarLayout.Padding = UDim.new(0, 6)
+SidebarLayout.Parent = Sidebar
+
+local SidebarPadding = Instance.new("UIPadding")
+SidebarPadding.PaddingTop = UDim.new(0, 10)
+SidebarPadding.PaddingLeft = UDim.new(0, 10)
+SidebarPadding.Parent = Sidebar
+
+local ContentArea = Instance.new("Frame")
+ContentArea.Size = UDim2.new(1, -170, 1, -50)
+ContentArea.Position = UDim2.new(0, 170, 0, 50)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = MainFrame
+
+local tabs = {}
+local tabButtons = {}
+
+local function createTabScroll(tabName)
+    local Scroll = Instance.new("ScrollingFrame")
+    Scroll.Name = tabName .. "Tab"
+    Scroll.Size = UDim2.new(1, 0, 1, 0)
+    Scroll.BackgroundTransparency = 1
+    Scroll.BorderSizePixel = 0
+    Scroll.ScrollBarThickness = 4
+    Scroll.ScrollBarImageColor3 = Color3.fromRGB(0, 140, 255)
+    Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Scroll.Visible = false
+    Scroll.Parent = ContentArea
+
+    local Layout = Instance.new("UIListLayout")
+    Layout.SortOrder = Enum.SortOrder.LayoutOrder
+    Layout.Padding = UDim.new(0, 8)
+    Layout.Parent = Scroll
+
+    tabs[tabName] = Scroll
+    return Scroll
+end
+
+local function switchTab(selectedName)
+    for name, scrollFrame in pairs(tabs) do
+        scrollFrame.Visible = (name == selectedName)
+    end
+    for name, btn in pairs(tabButtons) do
+        btn.TextColor3 = (name == selectedName) and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
+    end
+end
+
+local function AddTab(menuName)
+    local ScrollTab = createTabScroll(menuName)
+    local MenuBtn = Instance.new("TextButton")
+    MenuBtn.Size = UDim2.new(1, -15, 0, 30)
+    MenuBtn.BackgroundTransparency = 1
+    MenuBtn.Text = "  " .. menuName
+    MenuBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+    MenuBtn.TextXAlignment = Enum.TextXAlignment.Left
+    MenuBtn.Font = Enum.Font.GothamBold
+    MenuBtn.TextSize = 13
+    MenuBtn.Parent = Sidebar
+
+    tabButtons[menuName] = MenuBtn
+    MenuBtn.MouseButton1Click:Connect(function() switchTab(menuName) end)
+
+    if #tabButtons == 1 or not Sidebar:FindFirstChild("Selected") then
+        Sidebar:SetAttribute("Selected", true)
+        switchTab(menuName)
+    end
+    return ScrollTab
+end
+
+local function CreateSection(parentScroll, titleText)
+    local SecLabel = Instance.new("TextLabel")
+    SecLabel.Size = UDim2.new(1, 0, 0, 25)
+    SecLabel.BackgroundTransparency = 1
+    SecLabel.Text = titleText
+    SecLabel.TextColor3 = Color3.fromRGB(0, 180, 255)
+    SecLabel.TextXAlignment = Enum.TextXAlignment.Left
+    SecLabel.Font = Enum.Font.GothamBold
+    SecLabel.TextSize = 13
+    SecLabel.Parent = parentScroll
+end
+
+local function CreateToggle(parentScroll, name, defaultState, callback)
+    local TFrame = Instance.new("Frame")
+    TFrame.Size = UDim2.new(1, 0, 0, 42)
+    TFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    TFrame.BackgroundTransparency = 0.4
+    TFrame.Parent = parentScroll
+
+    local TC = Instance.new("UICorner")
+    TC.CornerRadius = UDim.new(0, 6)
+    TC.Parent = TFrame
+
+    local TLabel = Instance.new("TextLabel")
+    TLabel.Size = UDim2.new(1, -65, 1, 0)
+    TLabel.Position = UDim2.new(0, 12, 0, 0)
+    TLabel.BackgroundTransparency = 1
+    TLabel.Text = name
+    TLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TLabel.Font = Enum.Font.Gotham
+    TLabel.TextSize = 13
+    TLabel.Parent = TFrame
+
+    local TButton = Instance.new("TextButton")
+    TButton.Size = UDim2.new(0, 44, 0, 22)
+    TButton.Position = UDim2.new(1, -52, 0.5, -11)
+    TButton.BackgroundColor3 = defaultState and Color3.fromRGB(0, 140, 255) or Color3.fromRGB(40, 40, 40)
+    TButton.Text = ""
+    TButton.Parent = TFrame
+
+    local state = defaultState
+    TButton.MouseButton1Click:Connect(function()
+        state = not state
+        TButton.BackgroundColor3 = state and Color3.fromRGB(0, 140, 255) or Color3.fromRGB(40, 40, 40)
+        if callback then callback(state) end
+    end)
+end
+
+local function CreateSlider(parentScroll, name, min, max, default, callback)
+    local SFrame = Instance.new("Frame")
+    SFrame.Size = UDim2.new(1, 0, 0, 52)
+    SFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    SFrame.BackgroundTransparency = 0.4
+    SFrame.Parent = parentScroll
+
+    local SC = Instance.new("UICorner")
+    SC.CornerRadius = UDim.new(0, 6)
+    SC.Parent = SFrame
+
+    local TLabel = Instance.new("TextLabel")
+    TLabel.Size = UDim2.new(1, -24, 0, 22)
+    TLabel.Position = UDim2.new(0, 12, 0, 6)
+    TLabel.BackgroundTransparency = 1
+    TLabel.Text = name .. ": " .. tostring(default)
+    TLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TLabel.Font = Enum.Font.Gotham
+    TLabel.TextSize = 13
+    TLabel.Parent = SFrame
+
+    local Bar = Instance.new("Frame")
+    Bar.Size = UDim2.new(1, -24, 0, 8)
+    Bar.Position = UDim2.new(0, 12, 0, 34)
+    Bar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Bar.BorderSizePixel = 0
+    Bar.Parent = SFrame
+
+    local BC = Instance.new("UICorner")
+    BC.CornerRadius = UDim.new(0, 4)
+    BC.Parent = Bar
+
+    local Fill = Instance.new("Frame")
+    Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
+    Fill.BorderSizePixel = 0
+    Fill.Parent = Bar
+
+    local FC = Instance.new("UICorner")
+    FC.CornerRadius = UDim.new(0, 4)
+    FC.Parent = Fill
+
+    local value = default
+    local dragging = false
+
+    local function updateValue(input)
+        local pos = math.clamp((input.Position.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
+        value = math.floor(min + (max - min) * pos)
+        Fill.Size = UDim2.new(pos, 0, 1, 0)
+        TLabel.Text = name .. ": " .. tostring(value)
+        if callback then callback(value) end
+    end
+
+    Bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateValue(input)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateValue(input)
+        end
+    end)
+end
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.K then
+        if MainFrame.Visible then
+            MainFrame.Visible = false
+            FloatingIcon.Visible = true
+        else
+            MainFrame.Visible = true
+            FloatingIcon.Visible = false
+        end
     end
 end)
 
 -- ==========================================
--- LOGIKA AUTO FISH
+-- SMART SERVER HOP
 -- ==========================================
-TabFarm:CreateToggle({
-   Name = "Auto Fish",
-   CurrentValue = false,
-   Flag = "AutoFish",
-   Callback = function(Value)
-        autoFishEnabled = Value
-        if autoFishEnabled then
-            lastTapTime = os.clock() 
-            wasMinigameActive = false
-            task.spawn(tapScreen)
+local function serverHop()
+    pcall(function()
+        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
+        
+        local success, result = pcall(function()
+            if syn and syn.request then
+                local req = syn.request({Url = url, Method = "GET"})
+                return HttpService:JSONDecode(req.Body)
+            elseif request then
+                local req = request({Url = url, Method = "GET"})
+                return HttpService:JSONDecode(req.Body)
+            else
+                return HttpService:JSONDecode(game:HttpGet(url))
+            end
+        end)
+        
+        if success and result and result.data then
+            local exactServers = {}    
+            local fallbackServers = {} 
+            
+            for _, s in ipairs(result.data) do
+                if s.id ~= game.JobId and s.playing < s.maxPlayers then
+                    if s.playing == s.maxPlayers - 1 then
+                        table.insert(exactServers, s.id)
+                    else
+                        table.insert(fallbackServers, s.id)
+                    end
+                end
+            end
+            
+            if #exactServers > 0 then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, exactServers[math.random(1, #exactServers)], LocalPlayer)
+            elseif #fallbackServers > 0 then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, fallbackServers[math.random(1, #fallbackServers)], LocalPlayer)
+            else
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end
         else
-            setHoldState(false)
-            wasMinigameActive = false
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
         end
-   end,
-})
+    end)
+end
 
-local function getMinigameData()
-    if minigameTable and minigameTable.isGameActive ~= nil then
-        return minigameTable
+-- ==========================================
+-- HELPER FUNCTIONS FOR MINING & CLEAR CRYSTAL
+-- ==========================================
+local TargetRarities = {
+    ["Zenith"] = true,
+    ["Exotic"] = true,
+    ["Mythic"] = true
+}
+
+local function formatCurrency(amount)
+    if amount >= 1000000000 then
+        return string.format("%.2fB", amount / 1000000000)
+    elseif amount >= 1000000 then
+        return string.format("%.1fM", amount / 1000000)
+    elseif amount >= 1000 then
+        return string.format("%.1fK", amount / 1000)
     end
-    for _, v in pairs(getgc(true)) do
-        if type(v) == "table" and rawget(v, "isGameActive") ~= nil and rawget(v, "detecSize") ~= nil then
-            minigameTable = v
-            return minigameTable
+    return tostring(amount)
+end
+
+local function getAllRockObjects()
+    local rocks = {}
+    local candidateContainers = {
+        workspace:FindFirstChild("SpawnedGems"),
+        workspace:FindFirstChild("Boulders"),
+        workspace:FindFirstChild("Gems"),
+        workspace:FindFirstChild("Ores"),
+        workspace:FindFirstChild("Rocks"),
+        workspace:FindFirstChild("Nodes")
+    }
+    
+    for _, folder in ipairs(candidateContainers) do
+        if folder then
+            for _, child in ipairs(folder:GetChildren()) do
+                table.insert(rocks, child)
+            end
         end
+    end
+    
+    for _, child in ipairs(workspace:GetChildren()) do
+        if child:IsA("Model") or child:IsA("BasePart") then
+            if child.Name:lower():find("gem") or child.Name:lower():find("rock") or child.Name:lower():find("boulder") or child.Name:lower():find("ore") then
+                table.insert(rocks, child)
+            end
+        end
+    end
+    return rocks
+end
+
+local function getTargetPart(obj)
+    if obj:IsA("BasePart") then return obj end
+    if obj:IsA("Model") then
+        if obj.PrimaryPart then return obj.PrimaryPart end
+        local m = obj:FindFirstChild("Mesh_0") or obj:FindFirstChild("Part") or obj:FindFirstChildOfClass("BasePart")
+        if m then return m end
     end
     return nil
 end
 
-local timer = 0
-RunService.RenderStepped:Connect(function(dt)
-    if not autoFishEnabled then return end
+-- ==========================================
+-- TAB 1: WEATHER HUB
+-- ==========================================
+local TabWeather = AddTab("Weather")
 
-    local data = getMinigameData()
-    local isMinigameCurrentlyPlaying = (data and data.isGameActive and data.Detec and data.Attc)
-
-    if isMinigameCurrentlyPlaying then
-        wasMinigameActive = true
-        timer = timer + dt
-        if timer < HOLD_DELAY then return end
-        timer = 0
-
-        local detecPos = data.Detec.Position.X.Scale + (data.detecSize / 2)
-        local attcPos = data.Attc.Position.X.Scale + (data.attcSize / 2)
-
-        if not isCurrentlyHolding and detecPos < (attcPos - LOWER_BUFFER) then
-            setHoldState(true)
-        elseif isCurrentlyHolding and detecPos > (attcPos + UPPER_BUFFER) then
-            setHoldState(false)
-        end
-    else
-        setHoldState(false)
-
-        if wasMinigameActive then
-            wasMinigameActive = false
-            totalCaught = totalCaught + 1
-            fishToSellCount = fishToSellCount + 1
-            UpdateStats()
-            
-            if autoSellEnabled and fishToSellCount >= 150 then
-                task.spawn(doAutoSellTask)
-            else
-                task.spawn(function()
-                    task.wait(1.5)
-                    tapScreen()
-                    task.wait(1.5)
-                    tapScreen()
-                    lastTapTime = os.clock()
+CreateSection(TabWeather, "Rare Weather Scanner")
+local rareWeatherScanRunning = false
+CreateToggle(TabWeather, "Auto Hop: Blizzard / Lucky / Bloodborne", false, function(state)
+    rareWeatherScanRunning = state
+    if rareWeatherScanRunning then
+        Notify({Title = "Weather Scanner", Content = "Mencari Blizzard, Lucky, atau Bloodborne...", Duration = 3})
+        task.spawn(function()
+            while rareWeatherScanRunning do
+                local currentVal = ""
+                pcall(function()
+                    if WeatherState then
+                        currentVal = tostring(WeatherState.Value)
+                    end
                 end)
+                
+                if TargetWeathers[currentVal] then
+                    Notify({Title = "DITEMUKAN!", Content = "Cuaca " .. currentVal .. " ditemukan di server ini!", Duration = 6})
+                    rareWeatherScanRunning = false
+                    break
+                end
+                
+                local curText = (currentVal ~= "" and currentVal ~= "nil") and currentVal or "Normal / Loading"
+                Notify({Title = "Weather Scanner", Content = "Cuaca saat ini: " .. curText .. ". Pindah server...", Duration = 2})
+                
+                serverHop()
+                task.wait(10)
+            end
+        end)
+    else
+        Notify({Title = "Weather Scanner", Content = "Pencarian cuaca dihentikan.", Duration = 2})
+    end
+end)
+
+-- ==========================================
+-- TAB 2: MINING HUB (ESP ONLY)
+-- ==========================================
+local TabMining = AddTab("Mining")
+
+CreateSection(TabMining, "ESP Boulders & Runes (Highlight)")
+
+local customESPEnabled = false
+local espConnections = {}
+
+local function applyESP(model, color)
+    if not model:IsA("Model") then return end
+    
+    local highlight = model:FindFirstChildOfClass("Highlight")
+    if not highlight then
+        highlight = Instance.new("Highlight")
+        highlight.Name = "CustomESP"
+        highlight.FillColor = color or Color3.fromRGB(0, 255, 255)
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Parent = model
+    end
+
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BillboardGui") then
+            descendant.Enabled = true
+            descendant.AlwaysOnTop = true
+            descendant.MaxDistance = math.huge
+        end
+    end
+end
+
+local function removeESP()
+    local containers = {workspace:FindFirstChild("Boulders"), workspace:FindFirstChild("PlotRunes"), workspace:FindFirstChild("DroppedRunes")}
+    for _, folder in ipairs(containers) do
+        if folder then
+            for _, obj in ipairs(folder:GetDescendants()) do
+                if obj:IsA("Highlight") and obj.Name == "CustomESP" then
+                    obj:Destroy()
+                end
             end
         end
+    end
+end
 
-        if isSelling then return end
+CreateToggle(TabMining, "ESP All Visible (Boulders & Runes)", false, function(state)
+    customESPEnabled = state
+    if not customESPEnabled then
+        removeESP()
+        for _, conn in ipairs(espConnections) do conn:Disconnect() end
+        espConnections = {}
+        Notify({Title = "ESP Dimatikan", Content = "Semua ESP Boulders & Runes dihapus", Duration = 2})
+    else
+        Notify({Title = "ESP Diaktifkan", Content = "Menandai Boulders & Runes di map", Duration = 2})
+        
+        local boulders = workspace:FindFirstChild("Boulders")
+        if boulders then
+            for _, boulder in ipairs(boulders:GetChildren()) do
+                applyESP(boulder, Color3.fromRGB(255, 170, 0))
+            end
+            table.insert(espConnections, boulders.ChildAdded:Connect(function(child)
+                if customESPEnabled then
+                    task.wait(0.5)
+                    applyESP(child, Color3.fromRGB(255, 170, 0))
+                end
+            end))
+        end
 
-        if os.clock() - lastTapTime >= TAP_COOLDOWN then
-            lastTapTime = os.clock()
-            task.spawn(tapScreen)
+        local plotRunes = workspace:FindFirstChild("PlotRunes")
+        if plotRunes then
+            for _, rune in ipairs(plotRunes:GetDescendants()) do
+                if rune:IsA("Model") then
+                    applyESP(rune, Color3.fromRGB(0, 255, 128))
+                end
+            end
+            table.insert(espConnections, plotRunes.DescendantAdded:Connect(function(child)
+                if customESPEnabled and child:IsA("Model") then
+                    task.wait(0.5)
+                    applyESP(child, Color3.fromRGB(0, 255, 128))
+                end
+            end))
+        end
+
+        local droppedRunes = workspace:FindFirstChild("DroppedRunes")
+        if droppedRunes then
+            for _, rune in ipairs(droppedRunes:GetChildren()) do
+                applyESP(rune, Color3.fromRGB(0, 170, 255))
+            end
+            table.insert(espConnections, droppedRunes.ChildAdded:Connect(function(child)
+                if customESPEnabled then
+                    task.wait(0.5)
+                    applyESP(child, Color3.fromRGB(0, 170, 255))
+                end
+            end))
         end
     end
 end)
+
+CreateSection(TabMining, "Visual ESP Scan Nilai Batu (Radius 10.000 Studs)")
+
+local espScannerEnabled = false
+local maxScanRadius = 10000
+local activeValueESPs = {}
+
+local function updateOrValESP(part, text)
+    local bb = activeValueESPs[part]
+    if not bb then
+        bb = Instance.new("BillboardGui")
+        bb.Name = "NapoleonValueESP"
+        bb.Adornee = part
+        bb.Size = UDim2.new(0, 160, 0, 45)
+        bb.AlwaysOnTop = true
+        
+        local lbl = Instance.new("TextLabel")
+        lbl.Name = "ESPLabel"
+        lbl.Size = UDim2.new(1, 0, 1, 0)
+        lbl.BackgroundTransparency = 0.3
+        lbl.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+        lbl.TextColor3 = Color3.fromRGB(0, 255, 150)
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextSize = 10
+        lbl.Parent = bb
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = lbl
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(0, 140, 255)
+        stroke.Thickness = 1
+        stroke.Parent = lbl
+        
+        bb.Parent = part
+        activeValueESPs[part] = bb
+    end
+    
+    local lbl = bb:FindFirstChild("ESPLabel")
+    if lbl then
+        lbl.Text = text
+    end
+end
+
+CreateToggle(TabMining, "Visual ESP Scan Nilai Batu", false, function(state)
+    espScannerEnabled = state
+    if not espScannerEnabled then 
+        for part, bb in pairs(activeValueESPs) do if bb then bb:Destroy() end end
+        activeValueESPs = {}
+        Notify({Title = "Value ESP Off", Content = "ESP nilai dihilangkan", Duration = 2})
+    else
+        Notify({Title = "Value ESP On", Content = "Memindai nilai & berat batu...", Duration = 3})
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if espScannerEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local hrpPos = LocalPlayer.Character.HumanoidRootPart.Position
+            local rocks = getAllRockObjects()
+            local scannedParts = {}
+            
+            for _, obj in ipairs(rocks) do
+                local targetPart = getTargetPart(obj)
+                if targetPart then
+                    local rarity = obj:GetAttribute("Rarity") or obj:GetAttribute("Tier") or obj:GetAttribute("Type") or "Common"
+                    local val = obj:GetAttribute("Value") or obj:GetAttribute("Price") or obj:GetAttribute("SellPrice") or obj:GetAttribute("Worth") or 0
+                    local weight = obj:GetAttribute("Weight") or obj:GetAttribute("Kg") or obj:GetAttribute("Mass") or 0
+                    
+                    if TargetRarities[rarity] then
+                        local dist = math.floor((targetPart.Position - hrpPos).Magnitude)
+                        if dist <= maxScanRadius then
+                            scannedParts[targetPart] = true
+                            local infoStr = string.format("[%s]\nValue: %s | %skg\nJarak: %dm", rarity, formatCurrency(val), tostring(weight), dist)
+                            updateOrValESP(targetPart, infoStr)
+                        end
+                    end
+                end
+            end
+            
+            for part, bb in pairs(activeValueESPs) do
+                if not scannedParts[part] or not part.Parent then
+                    bb:Destroy()
+                    activeValueESPs[part] = nil
+                end
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- TAB 3: CLEAR CRYSTAL HUB (RESTORED)
+-- ==========================================
+local TabClearCrystal = AddTab("Clear Crystal")
+
+CreateSection(TabClearCrystal, "Auto Clear Rocks Around Rare Crystal")
+
+local clear200MEnabled = false
+local clear100MEnabled = false
+
+CreateToggle(TabClearCrystal, "Auto Clear Crystal (Income > 200Jt+)", false, function(state)
+    clear200MEnabled = state
+    Notify({Title = "Clear Crystal >200M", Content = state and "Aktif" or "Dimatikan", Duration = 3})
+    
+    if clear200MEnabled then
+        task.spawn(function()
+            local currentTarget = nil
+            while clear200MEnabled do
+                task.wait(0.5)
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    if not currentTarget or not currentTarget.Parent then
+                        currentTarget = nil
+                        local rocks = getAllRockObjects()
+                        local targetCrystalPart = nil
+                        
+                        for _, obj in ipairs(rocks) do
+                            local targetPart = getTargetPart(obj)
+                            if targetPart then
+                                local rarity = obj:GetAttribute("Rarity") or obj:GetAttribute("Tier") or obj:GetAttribute("Type") or "Common"
+                                local val = obj:GetAttribute("Value") or obj:GetAttribute("Price") or obj:GetAttribute("SellPrice") or obj:GetAttribute("Worth") or 0
+                                
+                                if TargetRarities[rarity] and val > 200000000 then
+                                    targetCrystalPart = targetPart
+                                    break
+                                end
+                            end
+                        end
+                        
+                        if targetCrystalPart then
+                            local crystalPos = targetCrystalPart.Position
+                            local closestSurroundingRock = nil
+                            local shortestDist = 25
+                            
+                            for _, obj in ipairs(rocks) do
+                                local rockPart = getTargetPart(obj)
+                                if rockPart and rockPart ~= targetCrystalPart then
+                                    local distToCrystal = (rockPart.Position - crystalPos).Magnitude
+                                    if distToCrystal <= shortestDist then
+                                        closestSurroundingRock = rockPart
+                                        shortestDist = distToCrystal
+                                        break
+                                    end
+                                end
+                            end
+                            
+                            if closestSurroundingRock then
+                                currentTarget = closestSurroundingRock
+                                smoothTeleport(CFrame.new(currentTarget.Position + Vector3.new(0, 3, 0)))
+                                Notify({Title = "Clearing Path", Content = "Smooth TP sekali ke batu penghalang (>200M)...", Duration = 1.5})
+                            else
+                                currentTarget = targetCrystalPart
+                                smoothTeleport(CFrame.new(currentTarget.Position + Vector3.new(0, 3, 0)))
+                                Notify({Title = "Crystal Reached!", Content = "Jalur bersih! Smooth TP sekali ke crystal >200M...", Duration = 2})
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+CreateToggle(TabClearCrystal, "Auto Clear Crystal (Income > 100Jt+)", false, function(state)
+    clear100MEnabled = state
+    Notify({Title = "Clear Crystal >100M", Content = state and "Aktif" or "Dimatikan", Duration = 3})
+    
+    if clear100MEnabled then
+        task.spawn(function()
+            local currentTarget = nil
+            while clear100MEnabled do
+                task.wait(0.5)
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    if not currentTarget or not currentTarget.Parent then
+                        currentTarget = nil
+                        local rocks = getAllRockObjects()
+                        local targetCrystalPart = nil
+                        
+                        for _, obj in ipairs(rocks) do
+                            local targetPart = getTargetPart(obj)
+                            if targetPart then
+                                local rarity = obj:GetAttribute("Rarity") or obj:GetAttribute("Tier") or obj:GetAttribute("Type") or "Common"
+                                local val = obj:GetAttribute("Value") or obj:GetAttribute("Price") or obj:GetAttribute("SellPrice") or obj:GetAttribute("Worth") or 0
+                                
+                                if TargetRarities[rarity] and val > 100000000 then
+                                    targetCrystalPart = targetPart
+                                    break
+                                end
+                            end
+                        end
+                        
+                        if targetCrystalPart then
+                            local crystalPos = targetCrystalPart.Position
+                            local closestSurroundingRock = nil
+                            local shortestDist = 25
+                            
+                            for _, obj in ipairs(rocks) do
+                                local rockPart = getTargetPart(obj)
+                                if rockPart and rockPart ~= targetCrystalPart then
+                                    local distToCrystal = (rockPart.Position - crystalPos).Magnitude
+                                    if distToCrystal <= shortestDist then
+                                        closestSurroundingRock = rockPart
+                                        shortestDist = distToCrystal
+                                        break
+                                    end
+                                end
+                            end
+                            
+                            if closestSurroundingRock then
+                                currentTarget = closestSurroundingRock
+                                smoothTeleport(CFrame.new(currentTarget.Position + Vector3.new(0, 3, 0)))
+                                Notify({Title = "Clearing Path", Content = "Smooth TP sekali ke batu penghalang (>100M)...", Duration = 1.5})
+                            else
+                                currentTarget = targetCrystalPart
+                                smoothTeleport(CFrame.new(currentTarget.Position + Vector3.new(0, 3, 0)))
+                                Notify({Title = "Crystal Reached!", Content = "Jalur bersih! Smooth TP sekali ke crystal >100M...", Duration = 2})
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- ==========================================
+-- TAB 4: METEOR TP
+-- ==========================================
+local TabMeteorTP = AddTab("Meteor TP")
+
+CreateSection(TabMeteorTP, "Teleport ke Impact Meteor")
+
+local function teleportToMeteor()
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    
+    if hrp and ImpactPos and ImpactPos.Value and ImpactPos.Value ~= Vector3.zero then
+        smoothTeleport(CFrame.new(ImpactPos.Value + Vector3.new(0, 10, 0)))
+        Notify({Title = "Meteor TP", Content = "Berhasil smooth TP ke lokasi meteor!", Duration = 3})
+    else
+        Notify({Title = "Meteor TP Gagal", Content = "Posisi meteor belum ditentukan server.", Duration = 3})
+    end
+end
+
+local TPBtnFrame = Instance.new("Frame")
+TPBtnFrame.Size = UDim2.new(1, 0, 0, 45)
+TPBtnFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+TPBtnFrame.BackgroundTransparency = 0.4
+TPBtnFrame.Parent = TabMeteorTP
+
+local TPCorner = Instance.new("UICorner")
+TPCorner.CornerRadius = UDim.new(0, 6)
+TPCorner.Parent = TPBtnFrame
+
+local TPBtn = Instance.new("TextButton")
+TPBtn.Size = UDim2.new(1, -16, 1, -8)
+TPBtn.Position = UDim2.new(0, 8, 0, 4)
+TPBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
+TPBtn.Text = "Smooth TP Sekarang ke Meteor"
+TPBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+TPBtn.Font = Enum.Font.GothamBold
+TPBtn.TextSize = 13
+TPBtn.Parent = TPBtnFrame
+
+local TPBtnCorner = Instance.new("UICorner")
+TPBtnCorner.CornerRadius = UDim.new(0, 6)
+TPBtnCorner.Parent = TPBtn
+
+TPBtn.MouseButton1Click:Connect(function()
+    teleportToMeteor()
+end)
+
+local autoTPMeteor = false
+CreateToggle(TabMeteorTP, "Auto TP ke Meteor Saat Jatuh", false, function(state)
+    autoTPMeteor = state
+    Notify({Title = "Auto TP Meteor", Content = state and "Aktif" or "Dimatikan", Duration = 2})
+end)
+
+if ImpactPos then
+    ImpactPos.Changed:Connect(function(newPos)
+        if autoTPMeteor and newPos and newPos ~= Vector3.zero then
+            local character = LocalPlayer.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                smoothTeleport(CFrame.new(newPos + Vector3.new(0, 10, 0)))
+                Notify({Title = "Auto TP Meteor", Content = "Otomatis smooth TP ke meteor baru!", Duration = 3})
+            end
+        end
+    end)
+end
+
+-- ==========================================
+-- TAB 5: SERVER HOP
+-- ==========================================
+local TabServerHopTab = AddTab("Server Hop")
+
+CreateSection(TabServerHopTab, "Pindah Server Manual")
+
+local HopBtnFrame = Instance.new("Frame")
+HopBtnFrame.Size = UDim2.new(1, 0, 0, 45)
+HopBtnFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+HopBtnFrame.BackgroundTransparency = 0.4
+HopBtnFrame.Parent = TabServerHopTab
+
+local HopCorner = Instance.new("UICorner")
+HopCorner.CornerRadius = UDim.new(0, 6)
+HopCorner.Parent = HopBtnFrame
+
+local HopBtn = Instance.new("TextButton")
+HopBtn.Size = UDim2.new(1, -16, 1, -8)
+HopBtn.Position = UDim2.new(0, 8, 0, 4)
+HopBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
+HopBtn.Text = "Pindah Server Sekarang (Smart Hop)"
+HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+HopBtn.Font = Enum.Font.GothamBold
+HopBtn.TextSize = 13
+HopBtn.Parent = HopBtnFrame
+
+local HopBtnCorner = Instance.new("UICorner")
+HopBtnCorner.CornerRadius = UDim.new(0, 6)
+HopBtnCorner.Parent = HopBtn
+
+HopBtn.MouseButton1Click:Connect(function()
+    Notify({Title = "Server Hop", Content = "Mencari server hampir penuh...", Duration = 3})
+    serverHop()
+end)
+
+-- ==========================================
+-- TAB 6: AUTO TRADE HUB
+-- ==========================================
+local TabTradeHub = AddTab("Trade")
+
+CreateSection(TabTradeHub, "Auto Trade Automation")
+
+local autoTradeEnabled = false
+CreateToggle(TabTradeHub, "Auto Trade (Accept, Ready, Confirm)", false, function(state)
+    autoTradeEnabled = state
+    Notify({Title = "Auto Trade", Content = state and "Aktif" or "Dimatikan", Duration = 3})
+end)
+
+task.spawn(function()
+    local successTrade, TradeRemotes = pcall(function() return ReplicatedStorage:WaitForChild("TradeRemotes", 3) end)
+    if successTrade and TradeRemotes then
+        local Incoming = TradeRemotes:WaitForChild("Incoming", 3)
+        local Respond = TradeRemotes:WaitForChild("Respond", 3)
+        local Ready = TradeRemotes:WaitForChild("Ready", 3)
+        local Confirm = TradeRemotes:WaitForChild("Confirm", 3)
+        local State = TradeRemotes:WaitForChild("State", 3)
+
+        if Incoming and Respond then
+            Incoming.OnClientEvent:Connect(function(data)
+                if not autoTradeEnabled then return end
+                if type(data) == "table" and not data.closed and data.id then
+                    task.wait(0.2)
+                    Respond:FireServer(data.id, true)
+                    Notify({Title = "Auto Trade", Content = "Otomatis menerima permintaan trade!", Duration = 2})
+                end
+            end)
+        end
+
+        if State and Ready and Confirm then
+            State.OnClientEvent:Connect(function(stateData)
+                if not autoTradeEnabled then return end
+                if type(stateData) == "table" and stateData.stage then
+                    if stateData.stage == "offer" and stateData.you and not stateData.you.ready then
+                        task.wait(0.5)
+                        Ready:FireServer(true)
+                        Notify({Title = "Auto Trade", Content = "Otomatis siap (Ready)!", Duration = 2})
+                    elseif stateData.stage == "confirm" and stateData.you and not stateData.you.confirmed then
+                        task.wait(0.5)
+                        Confirm:FireServer()
+                        Notify({Title = "Auto Trade", Content = "Otomatis konfirmasi (Confirm)!", Duration = 2})
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ==========================================
+-- TAB 7: AUTO SELL HUB (FILTER AMAN < 200JT)
+-- ==========================================
+local TabAutoSell = AddTab("Auto Sell")
+
+CreateSection(TabAutoSell, "Auto Sell Automation")
+
+local autoSellEnabled = false
+CreateToggle(TabAutoSell, "Auto Sell Gems (< 200 Jt Saja)", false, function(state)
+    autoSellEnabled = state
+    Notify({Title = "Auto Sell", Content = state and "Aktif (Aman dari Item Mahal)" or "Dimatikan", Duration = 3})
+end)
+
+task.spawn(function()
+    local successGem, GemRemotes = pcall(function() return ReplicatedStorage:WaitForChild("GemRemotes", 3) end)
+    if successGem and GemRemotes then
+        local RequestSell = GemRemotes:WaitForChild("RequestSell", 3)
+        if RequestSell then
+            task.spawn(function()
+                while true do
+                    task.wait(3)
+                    if autoSellEnabled then
+                        pcall(function()
+                            local rocks = getAllRockObjects()
+                            
+                            for _, obj in ipairs(rocks) do
+                                local rarity = obj:GetAttribute("Rarity") or obj:GetAttribute("Tier") or obj:GetAttribute("Type") or "Common"
+                                local val = obj:GetAttribute("Value") or obj:GetAttribute("Price") or obj:GetAttribute("SellPrice") or obj:GetAttribute("Worth") or 0
+                                
+                                if val < 200000000 and not TargetRarities[rarity] then
+                                    local uniqueId = obj:GetAttribute("Id") or obj.Name
+                                    RequestSell:FireServer(uniqueId)
+                                    task.wait(0.05)
+                                end
+                            end
+                        end)
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ==========================================
+-- TAB 8: MISC (AUTO INSTANT E, AUTO CLICKER E & ANTI AFK)
+-- ==========================================
+local TabMisc = AddTab("Misc")
+
+CreateSection(TabMisc, "Miscellaneous Automation")
+
+local autoInstantEnabled = true
+local promptConnection = nil
+
+for _, descendant in ipairs(workspace:GetDescendants()) do
+    if descendant:IsA("ProximityPrompt") then
+        descendant.HoldDuration = 0
+    end
+end
+promptConnection = workspace.DescendantAdded:Connect(function(child)
+    if autoInstantEnabled and child:IsA("ProximityPrompt") then
+        child.HoldDuration = 0
+    end
+end)
+
+CreateToggle(TabMisc, "Auto Instant Prompt (Tanpa Tahan E)", true, function(state)
+    autoInstantEnabled = state
+    Notify({Title = "Auto Instant", Content = state and "Aktif" or "Dimatikan", Duration = 3})
+    if autoInstantEnabled then
+        for _, descendant in ipairs(workspace:GetDescendants()) do
+            if descendant:IsA("ProximityPrompt") then
+                descendant.HoldDuration = 0
+            end
+        end
+    end
+end)
+
+local autoClickerEEnabled = false
+CreateToggle(TabMisc, "Auto Clicker E (Cepat & Anti Lag 240 FPS)", false, function(state)
+    autoClickerEEnabled = state
+    Notify({Title = "Auto Clicker E", Content = state and "Aktif (Optimized)" or "Dimatikan", Duration = 3})
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if autoClickerEEnabled then
+            pcall(function()
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    for _, prompt in ipairs(workspace:GetDescendants()) do
+                        if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+                            local parentPart = prompt.Parent
+                            if parentPart and parentPart:IsA("BasePart") then
+                                if (parentPart.Position - hrp.Position).Magnitude <= (prompt.MaxActivationDistance + 5) then
+                                    fireproximityprompt(prompt)
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+local antiAfkEnabled = true
+local vu = game:GetService("VirtualUser")
+local idledConnection = LocalPlayer.Idled:Connect(function()
+    if antiAfkEnabled then
+        vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end
+end)
+
+CreateToggle(TabMisc, "Anti AFK (Mencegah Kick Idle)", true, function(state)
+    antiAfkEnabled = state
+    Notify({Title = "Anti AFK", Content = state and "Aktif" or "Dimatikan", Duration = 3})
+end)
+
+-- ==========================================
+-- TAB 9: PLAYER HUB (LOOP SPEED 35, FLY & NOCLIP)
+-- ==========================================
+local TabPlayer = AddTab("Player")
+
+CreateSection(TabPlayer, "Movement & Physics Modifiers")
+
+local noclipEnabled = false
+RunService.Stepped:Connect(function()
+    if noclipEnabled and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+CreateToggle(TabPlayer, "Enable NoClip (Tembus Dinding)", false, function(state)
+    noclipEnabled = state
+    Notify({Title = "NoClip", Content = "Diaktifkan" or "Dimatikan", Duration = 2})
+end)
+
+-- Loop Speed Setup
+local loopSpeedEnabled = false
+local walkSpeedValue = 35
+
+CreateSlider(TabPlayer, "Loop Speed Value", 16, 300, 35, function(val)
+    walkSpeedValue = val
+end)
+
+CreateToggle(TabPlayer, "Enable Loop Speed", false, function(state)
+    loopSpeedEnabled = state
+    Notify({Title = "Loop Speed", Content = state and ("Aktif (" .. walkSpeedValue .. ")") or "Dimatikan", Duration = 2})
+end)
+
+RunService.Heartbeat:Connect(function()
+    if loopSpeedEnabled and LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = walkSpeedValue
+        end
+    end
+end)
+
+local flying = false
+local flySpeed = 50
+local bodyGyro, bodyVelocity
+
+CreateSlider(TabPlayer, "Kecepatan Fly", 1, 1000, 50, function(val)
+    flySpeed = val
+end)
+
+local function startFlying()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.P = 9e4
+    bodyGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bodyGyro.cframe = hrp.CFrame
+    bodyGyro.Parent = hrp
+
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.velocity = Vector3.new(0, 0.1, 0)
+    bodyVelocity.maxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocity.Parent = hrp
+
+    task.spawn(function()
+        while flying and LocalPlayer.Character and hrp and hrp.Parent do
+            RunService.RenderStepped:Wait()
+            local cam = workspace.CurrentCamera
+            local moveDir = Vector3.new()
+            
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                moveDir = moveDir + cam.CFrame.LookVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                moveDir = moveDir - cam.CFrame.LookVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                moveDir = moveDir - cam.CFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                moveDir = moveDir + cam.CFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                moveDir = moveDir + Vector3.new(0, 1, 0)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Q) then
+                moveDir = moveDir - Vector3.new(0, 1, 0)
+            end
+
+            bodyGyro.cframe = cam.CFrame
+            bodyVelocity.velocity = moveDir * flySpeed
+        end
+        if bodyGyro then bodyGyro:Destroy() end
+        if bodyVelocity then bodyVelocity:Destroy() end
+    end)
+end
+
+local function stopFlying()
+    flying = false
+    if bodyGyro then bodyGyro:Destroy() end
+    if bodyVelocity then bodyVelocity:Destroy() end
+end
+
+CreateToggle(TabPlayer, "Enable Fly (Terbang WASD)", false, function(state)
+    flying = state
+    if flying then
+        startFlying()
+        Notify({Title = "Fly Enabled", Content = "Gunakan WASD, Spasi (Naik), Q (Turun)", Duration = 4})
+    else
+        stopFlying()
+        Notify({Title = "Fly Disabled", Content = "Kembali ke mode normal", Duration = 2})
+    end
+end)
+
+-- ==========================================
+-- TAB 10: BOMB SHOP HUB (AUTO BUY DIVINE BOMB)
+-- ==========================================
+local TabBomb = AddTab("Bomb Shop")
+
+CreateSection(TabBomb, "Bomb Shop Automation")
+
+local autoBuyDivineEnabled = false
+CreateToggle(TabBomb, "Auto Buy Divine Bomb", false, function(state)
+    autoBuyDivineEnabled = state
+    Notify({Title = "Auto Buy Divine", Content = state and "Aktif (Menunggu stok)" or "Dimatikan", Duration = 3})
+end)
+
+task.spawn(function()
+    local successRemotes, BombRemotes = pcall(function() return ReplicatedStorage:WaitForChild("BombRemotes", 3) end)
+    if successRemotes and BombRemotes then
+        local BuyBomb = BombRemotes:WaitForChild("BuyBomb", 3)
+        local ShopState = BombRemotes:WaitForChild("ShopState", 3)
+        
+        if ShopState and BuyBomb then
+            ShopState.OnClientEvent:Connect(function(data)
+                if not autoBuyDivineEnabled then return end
+                if not data or not data.stock then return end
+                
+                local TARGET_BOMB_ID = "divine"
+                local currentStock = data.stock[TARGET_BOMB_ID]
+                
+                if currentStock and currentStock > 0 then
+                    Notify({Title = "Divine Bomb!", Content = string.format("Stok tersedia: %d. Membeli...", currentStock), Duration = 3})
+                    pcall(function()
+                        BuyBomb:FireServer(TARGET_BOMB_ID, "cash")
+                    end)
+                end
+            end)
+        end
+    end
+end)
+
+Notify({Title = "Napoleon Hub", Content = "Berhasil Dimuat dengan Loop Speed & Auto Sell Aman!", Duration = 3})
