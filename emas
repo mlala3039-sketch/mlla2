@@ -1,0 +1,739 @@
+-- =================================================================
+-- ULTIMATE ALL-IN-ONE AUTO FARM & ANTI-AFK (ROBLOX SCRIPT)
+-- =================================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local TeleportService = game:GetService("TeleportService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local VirtualUser = game:GetService("VirtualUser")
+
+-- 1. REMOTE REFERENCES
+local ShopRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Shop"):WaitForChild("SellAll")
+local SoundEffects = SoundService:WaitForChild("SoundEffects", 5)
+local ShopSounds = SoundEffects and SoundEffects:WaitForChild("Shop", 5)
+local UISounds = SoundService:WaitForChild("UI", 5)
+local ErrorSound = UISounds and UISounds:WaitForChild("Error", 5)
+
+pcall(function()
+	LocalPlayer:SetAttribute("SellAnywhere", true)
+end)
+
+-- 2. GLOBAL STATE VARIABLES
+local AutoPanEnabled = false
+local AutoSellEnabled = false
+local AutoScanPanEnabled = false
+local AntiAFKEnabled = true
+local isRunning = false
+local isSellingInProcess = false
+
+-- Variabel Target Max Space dari Slider (Default: 792, Min: 1, Max: 2000)
+local TargetMaxSpace = 792
+
+local TP1_CFrame = nil -- TP 1: Dig / Deposit
+local TP2_CFrame = nil -- TP 2: Water / Shake
+local TPNPC_CFrame = nil -- TP 3: NPC Sell Location
+
+local lastActionTime = os.clock()
+local lastShakeTime = 0
+
+-- VARIABEL DETEKSI STUCK & TAS PENUH
+local lastFillValue = -1
+local lastFillChangeTime = os.clock()
+local zeroFillStartTime = os.clock()
+
+-- =================================================================
+-- 3. LOGIKA ANTI-AFK & AUTO-RECONNECT
+-- =================================================================
+
+-- Mencegah Kick saat Idle / Diam (20+ menit)
+LocalPlayer.Idled:Connect(function()
+	if AntiAFKEnabled then
+		VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+		task.wait(1)
+		VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+	end
+end)
+
+-- Auto Reconnect jika terputus dari server
+pcall(function()
+	CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
+		if child.Name == "ErrorPrompt" then
+			task.wait(2)
+			TeleportService:Teleport(game.PlaceId, LocalPlayer)
+		end
+	end)
+end)
+
+-- =================================================================
+-- 4. HELPER FUNCTIONS AUTO FARM
+-- =================================================================
+
+local function getCurrentCFrame()
+	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
+	if hrp then
+		return hrp.CFrame
+	end
+	return nil
+end
+
+local function teleportTo(cframe)
+	if not cframe then return end
+	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
+	if hrp then
+		hrp.CFrame = cframe
+	end
+end
+
+local function formatCFrame(cframe)
+	if not cframe then return "Unset" end
+	local pos = cframe.Position
+	return string.format("%.0f, %.0f, %.0f", pos.X, pos.Y, pos.Z)
+end
+
+local function getEquippedPan()
+	local character = LocalPlayer.Character
+	if not character then return nil end
+	local tool = character:FindFirstChildOfClass("Tool")
+	if tool then
+		return tool
+	end
+	local backpack = LocalPlayer:FindFirstChild("Backpack")
+	if backpack then
+		for _, item in ipairs(backpack:GetChildren()) do
+			if item:IsA("Tool") then
+				return item
+			end
+		end
+	end
+	return nil
+end
+
+-- DETEKSI KAPASITAS TAS DARI PLAYER BACKPACK
+local function getBackpackInfo()
+	local currentCount = 0
+
+	local bp1 = LocalPlayer:FindFirstChild("Backpack")
+	local bp2 = LocalPlayer:FindFirstChild("BackpackTwo")
+	
+	if bp1 then
+		for _, item in ipairs(bp1:GetChildren()) do
+			if item:IsA("Tool") then currentCount = currentCount + 1 end
+		end
+	end
+	if bp2 then
+		for _, item in ipairs(bp2:GetChildren()) do
+			if item:IsA("Tool") then currentCount = currentCount + 1 end
+		end
+	end
+
+	return currentCount, TargetMaxSpace
+end
+
+-- DETEKSI NILAI FILL KUALI DARI PAN & UI GAME
+local function getPanFillInfo()
+	local panTool = getEquippedPan()
+	local currentFill = 0
+	local maxCapacity = 406
+
+	if panTool then
+		currentFill = panTool:GetAttribute("Fill") or panTool:GetAttribute("PanFill") or 0
+		maxCapacity = panTool:GetAttribute("MaxFill") or panTool:GetAttribute("Capacity") or maxCapacity
+	end
+
+	pcall(function()
+		for _, gui in ipairs(PlayerGui:GetChildren()) do
+			if gui:IsA("ScreenGui") and gui.Name ~= "UltimateAutoFarmGui" then
+				local label = gui:FindFirstChild("FillText", true) or gui:FindFirstChild("PanFill", true)
+				if label and label:IsA("TextLabel") and label.Text:match("(%d+)/(%d+)") then
+					local cur, maxVal = label.Text:match("(%d+)/(%d+)")
+					currentFill = tonumber(cur) or currentFill
+					maxCapacity = tonumber(maxVal) or maxCapacity
+					break
+				end
+			end
+		end
+	end)
+
+	return currentFill, maxCapacity
+end
+
+-- AUTO SCAN & KLIK TOMBOL AUTO PAN GAME
+local function ensureInGameAutoPanEnabled()
+	if not AutoScanPanEnabled then return end
+	
+	pcall(function()
+		local mainGui = PlayerGui:FindFirstChild("PanGui") or PlayerGui:FindFirstChild("Main") or PlayerGui:FindFirstChild("ScreenGui")
+		if not mainGui then
+			for _, gui in ipairs(PlayerGui:GetChildren()) do
+				if gui:IsA("ScreenGui") and gui.Name ~= "UltimateAutoFarmGui" then
+					local btn = gui:FindFirstChild("AutoPan", true) or gui:FindFirstChild("Auto Pan", true)
+					if btn then
+						mainGui = gui
+						break
+					end
+				end
+			end
+		end
+
+		if mainGui then
+			local autoPanBtn = mainGui:FindFirstChild("AutoPan", true) or mainGui:FindFirstChild("Auto Pan", true)
+			if autoPanBtn and (autoPanBtn:IsA("GuiButton") or autoPanBtn:IsA("TextButton") or autoPanBtn:IsA("ImageButton")) then
+				local bgColor = autoPanBtn.BackgroundColor3
+				local isRed = (bgColor.R > 0.5 and bgColor.G < 0.4) or autoPanBtn:GetAttribute("Enabled") == false
+
+				if isRed then
+					if getconnections then
+						for _, conn in ipairs(getconnections(autoPanBtn.MouseButton1Click)) do
+							conn:Fire()
+						end
+						for _, conn in ipairs(getconnections(autoPanBtn.Activated)) do
+							conn:Fire()
+						end
+					end
+					
+					local pos = autoPanBtn.AbsolutePosition
+					local size = autoPanBtn.AbsoluteSize
+					VirtualInputManager:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + 36, 0, true, game, 0)
+					task.wait(0.05)
+					VirtualInputManager:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + 36, 0, false, game, 0)
+				end
+			end
+		end
+	end)
+end
+
+local function forceResetTool()
+	local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character then
+		character:SetAttribute("Panning", nil)
+		if humanoid then
+			humanoid:UnequipTools()
+			task.wait(0.1)
+			local backpack = LocalPlayer:FindFirstChild("Backpack")
+			if backpack then
+				for _, item in ipairs(backpack:GetChildren()) do
+					if item:IsA("Tool") then
+						humanoid:EquipTool(item)
+						break
+					end
+				end
+			end
+		end
+	end
+	lastActionTime = os.clock()
+	lastFillChangeTime = os.clock()
+	zeroFillStartTime = os.clock()
+end
+
+local function playSellSound(amount)
+	if not ShopSounds then return end
+	if amount > 1000000 then
+		if ShopSounds:FindFirstChild("BigSell") then ShopSounds.BigSell:Play() end
+	elseif amount > 100000 then
+		if ShopSounds:FindFirstChild("MediumSell") then ShopSounds.MediumSell:Play() end
+	elseif amount > 0 then
+		if ShopSounds:FindFirstChild("SmallSell") then ShopSounds.SmallSell:Play() end
+	else
+		if ErrorSound then ErrorSound:Play() end
+	end
+end
+
+local function sellItems()
+	local success, earnings = pcall(function()
+		return ShopRemote:InvokeServer()
+	end)
+	if success and typeof(earnings) == "number" then
+		if earnings > 0 then
+			playSellSound(earnings)
+		end
+		return earnings
+	end
+	return 0
+end
+
+local function triggerSellAllNow()
+	if TPNPC_CFrame then
+		teleportTo(TPNPC_CFrame)
+		task.wait(0.15)
+	end
+	
+	for i = 1, 3 do
+		sellItems()
+		task.wait(0.1)
+	end
+	task.wait(0.15)
+	
+	local currentFill, _ = getPanFillInfo()
+
+	if currentFill > 0 then
+		if TP2_CFrame then teleportTo(TP2_CFrame) end
+	else
+		if TP1_CFrame then teleportTo(TP1_CFrame) end
+	end
+	
+	lastActionTime = os.clock()
+	lastFillChangeTime = os.clock()
+	zeroFillStartTime = os.clock()
+end
+
+-- =================================================================
+-- 5. LOGIKA UTAMA LOOPING AUTO FARM
+-- =================================================================
+
+local function runAutoLoop()
+	if isRunning then return end
+	isRunning = true
+
+	task.spawn(function()
+		while AutoPanEnabled or AutoSellEnabled or AutoScanPanEnabled do
+			ensureInGameAutoPanEnabled()
+
+			local character = LocalPlayer.Character
+			local hrp = character and character:FindFirstChild("HumanoidRootPart")
+			local itemCount, maxBackpackSpace = getBackpackInfo()
+
+			if os.clock() - lastActionTime > 3 then
+				isSellingInProcess = false
+				forceResetTool()
+			end
+
+			-- LOGIKA AUTO SELL PENUH
+			if itemCount >= maxBackpackSpace and AutoSellEnabled and not isSellingInProcess then
+				isSellingInProcess = true
+				triggerSellAllNow()
+				isSellingInProcess = false
+			end
+
+			-- LOGIKA AUTO COLLECT / SHAKE / STUCK CHECK
+			if AutoPanEnabled and not isSellingInProcess and character and hrp then
+				local panTool = getEquippedPan()
+
+				if not panTool then
+					forceResetTool()
+					panTool = getEquippedPan()
+				end
+
+				if panTool then
+					local scriptsFolder = panTool:FindFirstChild("Scripts") or panTool
+					local collectRemote = scriptsFolder:FindFirstChild("Collect")
+					local panRemote = scriptsFolder:FindFirstChild("Pan")
+					local shakeRemote = scriptsFolder:FindFirstChild("Shake")
+
+					local currentFill, maxCapacity = getPanFillInfo()
+					local isPanning = character:GetAttribute("Panning")
+
+					if currentFill ~= lastFillValue then
+						lastFillValue = currentFill
+						lastFillChangeTime = os.clock()
+					end
+
+					-- Deteksi Stuck di 0 selama > 2.5 detik
+					if currentFill == 0 then
+						if os.clock() - zeroFillStartTime > 2.5 then
+							isSellingInProcess = true
+							triggerSellAllNow()
+							isSellingInProcess = false
+						end
+					else
+						zeroFillStartTime = os.clock()
+					end
+
+					-- Deteksi Stuck Fill di tengah jalan > 1.5 detik
+					local isFillStuck = (currentFill > 0) and (os.clock() - lastFillChangeTime > 1.5)
+
+					if isFillStuck then
+						isSellingInProcess = true
+						triggerSellAllNow()
+						isSellingInProcess = false
+
+					-- STATE NORMAL: PENUH OR PANNING -> SHAKE DI TP 2
+					elseif isPanning or currentFill >= maxCapacity then
+						if TP2_CFrame then teleportTo(TP2_CFrame) end
+
+						if not isPanning and panRemote then
+							task.spawn(function()
+								panRemote:InvokeServer()
+							end)
+							task.wait(0.1)
+						end
+
+						if shakeRemote then
+							shakeRemote:FireServer()
+							lastShakeTime = os.clock()
+							lastActionTime = os.clock()
+						end
+
+					-- STATE BELUM PENUH -> TP 1 & MENGGALI
+					else
+						if itemCount < maxBackpackSpace then
+							if TP1_CFrame then teleportTo(TP1_CFrame) end
+							if collectRemote then
+								task.spawn(function()
+									collectRemote:InvokeServer(3, false)
+								end)
+								lastActionTime = os.clock()
+							end
+						end
+					end
+				end
+			end
+
+			task.wait(0.01)
+		end
+		isRunning = false
+	end)
+end
+
+-- =================================================================
+-- 6. INTERFACE (GUI PANEL & GABUNGAN ANTI-AFK TOGGLE)
+-- =================================================================
+
+if PlayerGui:FindFirstChild("UltimateAutoFarmGui") then
+	PlayerGui.UltimateAutoFarmGui:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "UltimateAutoFarmGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 270, 0, 445)
+MainFrame.Position = UDim2.new(0.05, 0, 0.22, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 10)
+MainCorner.Parent = MainFrame
+
+-- Title
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, -30, 0, 32)
+TitleText.Position = UDim2.new(0, 10, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "Auto Farm + Anti-AFK"
+TitleText.TextColor3 = Color3.fromRGB(0, 255, 200)
+TitleText.TextSize = 11
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = MainFrame
+
+-- Exit Button (X)
+local ExitBtn = Instance.new("TextButton")
+ExitBtn.Size = UDim2.new(0, 24, 0, 24)
+ExitBtn.Position = UDim2.new(1, -27, 0, 4)
+ExitBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ExitBtn.Text = "X"
+ExitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ExitBtn.Font = Enum.Font.GothamBold
+ExitBtn.Parent = MainFrame
+
+local ExitCorner = Instance.new("UICorner")
+ExitCorner.CornerRadius = UDim.new(0, 6)
+ExitCorner.Parent = ExitBtn
+
+-- Set TP Buttons
+local SetTP1Btn = Instance.new("TextButton")
+SetTP1Btn.Size = UDim2.new(0.28, 0, 0, 26)
+SetTP1Btn.Position = UDim2.new(0.05, 0, 0.08, 0)
+SetTP1Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+SetTP1Btn.Text = "Set TP 1"
+SetTP1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SetTP1Btn.Font = Enum.Font.GothamBold
+SetTP1Btn.TextSize = 10
+SetTP1Btn.Parent = MainFrame
+
+local SetTP2Btn = Instance.new("TextButton")
+SetTP2Btn.Size = UDim2.new(0.28, 0, 0, 26)
+SetTP2Btn.Position = UDim2.new(0.36, 0, 0.08, 0)
+SetTP2Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+SetTP2Btn.Text = "Set TP 2"
+SetTP2Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SetTP2Btn.Font = Enum.Font.GothamBold
+SetTP2Btn.TextSize = 10
+SetTP2Btn.Parent = MainFrame
+
+local SetTPNPCBtn = Instance.new("TextButton")
+SetTPNPCBtn.Size = UDim2.new(0.28, 0, 0, 26)
+SetTPNPCBtn.Position = UDim2.new(0.67, 0, 0.08, 0)
+SetTPNPCBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+SetTPNPCBtn.Text = "Set NPC"
+SetTPNPCBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SetTPNPCBtn.Font = Enum.Font.GothamBold
+SetTPNPCBtn.TextSize = 10
+SetTPNPCBtn.Parent = MainFrame
+
+for _, btn in ipairs({SetTP1Btn, SetTP2Btn, SetTPNPCBtn}) do
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 6)
+	c.Parent = btn
+end
+
+-- Item Counter Label
+local ItemCounterLabel = Instance.new("TextLabel")
+ItemCounterLabel.Size = UDim2.new(0.9, 0, 0, 24)
+ItemCounterLabel.Position = UDim2.new(0.05, 0, 0.15, 0)
+ItemCounterLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+ItemCounterLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+ItemCounterLabel.Font = Enum.Font.GothamMedium
+ItemCounterLabel.TextSize = 10
+ItemCounterLabel.Text = "Item Count: 0 / 792"
+ItemCounterLabel.Parent = MainFrame
+
+local CounterCorner = Instance.new("UICorner")
+CounterCorner.CornerRadius = UDim.new(0, 6)
+CounterCorner.Parent = ItemCounterLabel
+
+-- SLIDER FITUR (1 - 2000)
+local SliderFrame = Instance.new("Frame")
+SliderFrame.Size = UDim2.new(0.9, 0, 0, 16)
+SliderFrame.Position = UDim2.new(0.05, 0, 0.22, 0)
+SliderFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+SliderFrame.Parent = MainFrame
+
+local SliderCorner = Instance.new("UICorner")
+SliderCorner.CornerRadius = UDim.new(0, 8)
+SliderCorner.Parent = SliderFrame
+
+local SliderFill = Instance.new("Frame")
+SliderFill.Size = UDim2.new(792 / 2000, 0, 1, 0)
+SliderFill.BackgroundColor3 = Color3.fromRGB(0, 200, 150)
+SliderFill.Parent = SliderFrame
+
+local SliderFillCorner = Instance.new("UICorner")
+SliderFillCorner.CornerRadius = UDim.new(0, 8)
+SliderFillCorner.Parent = SliderFill
+
+local SliderBtn = Instance.new("TextButton")
+SliderBtn.Size = UDim2.new(1, 0, 1, 0)
+SliderBtn.BackgroundTransparency = 1
+SliderBtn.Text = ""
+SliderBtn.Parent = SliderFrame
+
+local isDraggingSlider = false
+
+local function updateSlider(input)
+	local pos = math.clamp((input.Position.X - SliderFrame.AbsolutePosition.X) / SliderFrame.AbsoluteSize.X, 0, 1)
+	local val = math.clamp(math.floor(pos * 2000), 1, 2000)
+	TargetMaxSpace = val
+	SliderFill.Size = UDim2.new(pos, 0, 1, 0)
+end
+
+SliderBtn.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		isDraggingSlider = true
+		updateSlider(input)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		isDraggingSlider = false
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if isDraggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		updateSlider(input)
+	end
+end)
+
+-- Toggle Buttons
+local ToggleFarmBtn = Instance.new("TextButton")
+ToggleFarmBtn.Size = UDim2.new(0.9, 0, 0, 26)
+ToggleFarmBtn.Position = UDim2.new(0.05, 0, 0.28, 0)
+ToggleFarmBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+ToggleFarmBtn.Text = "Auto Farm: OFF"
+ToggleFarmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleFarmBtn.Font = Enum.Font.GothamBold
+ToggleFarmBtn.TextSize = 10
+ToggleFarmBtn.Parent = MainFrame
+
+local ToggleSellBtn = Instance.new("TextButton")
+ToggleSellBtn.Size = UDim2.new(0.9, 0, 0, 26)
+ToggleSellBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
+ToggleSellBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+ToggleSellBtn.Text = "Auto Sell (Saat Penuh): OFF"
+ToggleSellBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleSellBtn.Font = Enum.Font.GothamBold
+ToggleSellBtn.TextSize = 10
+ToggleSellBtn.Parent = MainFrame
+
+local ToggleScanBtn = Instance.new("TextButton")
+ToggleScanBtn.Size = UDim2.new(0.9, 0, 0, 26)
+ToggleScanBtn.Position = UDim2.new(0.05, 0, 0.42, 0)
+ToggleScanBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+ToggleScanBtn.Text = "Auto Scan Green: OFF"
+ToggleScanBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleScanBtn.Font = Enum.Font.GothamBold
+ToggleScanBtn.TextSize = 10
+ToggleScanBtn.Parent = MainFrame
+
+-- Tombol Toggle Anti-AFK Tambahan di Panel
+local ToggleAntiAFKBtn = Instance.new("TextButton")
+ToggleAntiAFKBtn.Size = UDim2.new(0.9, 0, 0, 26)
+ToggleAntiAFKBtn.Position = UDim2.new(0.05, 0, 0.49, 0)
+ToggleAntiAFKBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+ToggleAntiAFKBtn.Text = "Anti-AFK & Reconnect: ON"
+ToggleAntiAFKBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleAntiAFKBtn.Font = Enum.Font.GothamBold
+ToggleAntiAFKBtn.TextSize = 10
+ToggleAntiAFKBtn.Parent = MainFrame
+
+local ManualSellBtn = Instance.new("TextButton")
+ManualSellBtn.Size = UDim2.new(0.9, 0, 0, 26)
+ManualSellBtn.Position = UDim2.new(0.05, 0, 0.56, 0)
+ManualSellBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 200)
+ManualSellBtn.Text = "⚡ Sell All Items Now (3x)"
+ManualSellBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ManualSellBtn.Font = Enum.Font.GothamBold
+ManualSellBtn.TextSize = 10
+ManualSellBtn.Parent = MainFrame
+
+for _, btn in ipairs({ToggleFarmBtn, ToggleSellBtn, ToggleScanBtn, ToggleAntiAFKBtn, ManualSellBtn}) do
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 6)
+	c.Parent = btn
+end
+
+local StatusInfoLabel = Instance.new("TextLabel")
+StatusInfoLabel.Size = UDim2.new(0.9, 0, 0, 45)
+StatusInfoLabel.Position = UDim2.new(0.05, 0, 0.64, 0)
+StatusInfoLabel.BackgroundTransparency = 1
+StatusInfoLabel.Text = "TP 1: Unset\nTP 2: Unset\nNPC: Unset"
+StatusInfoLabel.TextColor3 = Color3.fromRGB(160, 220, 255)
+StatusInfoLabel.TextSize = 9
+StatusInfoLabel.Font = Enum.Font.Gotham
+StatusInfoLabel.TextWrapped = true
+StatusInfoLabel.TextYAlignment = Enum.TextYAlignment.Top
+StatusInfoLabel.Parent = MainFrame
+
+-- Item Counter Loop Update
+task.spawn(function()
+	while ScreenGui.Parent do
+		local count, maxSpace = getBackpackInfo()
+		if count >= maxSpace then
+			ItemCounterLabel.Text = "Item Count: " .. count .. " / " .. maxSpace .. " (TAS PENUH!)"
+			ItemCounterLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+		else
+			ItemCounterLabel.Text = "Item Count: " .. count .. " / " .. maxSpace
+			ItemCounterLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+		end
+		task.wait(0.2)
+	end
+end)
+
+local function updateStatusLabel()
+	local t1 = formatCFrame(TP1_CFrame)
+	local t2 = formatCFrame(TP2_CFrame)
+	local t3 = formatCFrame(TPNPC_CFrame)
+	StatusInfoLabel.Text = "📍 TP 1: " .. t1 .. "\n📍 TP 2: " .. t2 .. "\n📍 NPC: " .. t3
+end
+
+SetTP1Btn.MouseButton1Click:Connect(function()
+	local cframe = getCurrentCFrame()
+	if cframe then
+		TP1_CFrame = cframe
+		SetTP1Btn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+		updateStatusLabel()
+	end
+end)
+
+SetTP2Btn.MouseButton1Click:Connect(function()
+	local cframe = getCurrentCFrame()
+	if cframe then
+		TP2_CFrame = cframe
+		SetTP2Btn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+		updateStatusLabel()
+	end
+end)
+
+SetTPNPCBtn.MouseButton1Click:Connect(function()
+	local cframe = getCurrentCFrame()
+	if cframe then
+		TPNPC_CFrame = cframe
+		SetTPNPCBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+		updateStatusLabel()
+	end
+end)
+
+ToggleFarmBtn.MouseButton1Click:Connect(function()
+	AutoPanEnabled = not AutoPanEnabled
+	if AutoPanEnabled then
+		ToggleFarmBtn.Text = "Auto Farm: ON"
+		ToggleFarmBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+		lastActionTime = os.clock()
+		lastFillChangeTime = os.clock()
+		zeroFillStartTime = os.clock()
+		runAutoLoop()
+	else
+		ToggleFarmBtn.Text = "Auto Farm: OFF"
+		ToggleFarmBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	end
+end)
+
+ToggleSellBtn.MouseButton1Click:Connect(function()
+	AutoSellEnabled = not AutoSellEnabled
+	if AutoSellEnabled then
+		ToggleSellBtn.Text = "Auto Sell (Saat Penuh): ON"
+		ToggleSellBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+		lastActionTime = os.clock()
+		runAutoLoop()
+	else
+		ToggleSellBtn.Text = "Auto Sell (Saat Penuh): OFF"
+		ToggleSellBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	end
+end)
+
+ToggleScanBtn.MouseButton1Click:Connect(function()
+	AutoScanPanEnabled = not AutoScanPanEnabled
+	if AutoScanPanEnabled then
+		ToggleScanBtn.Text = "Auto Scan Green: ON"
+		ToggleScanBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+		runAutoLoop()
+	else
+		ToggleScanBtn.Text = "Auto Scan Green: OFF"
+		ToggleScanBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	end
+end)
+
+ToggleAntiAFKBtn.MouseButton1Click:Connect(function()
+	AntiAFKEnabled = not AntiAFKEnabled
+	if AntiAFKEnabled then
+		ToggleAntiAFKBtn.Text = "Anti-AFK & Reconnect: ON"
+		ToggleAntiAFKBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+	else
+		ToggleAntiAFKBtn.Text = "Anti-AFK & Reconnect: OFF"
+		ToggleAntiAFKBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	end
+end)
+
+ManualSellBtn.MouseButton1Click:Connect(function()
+	isSellingInProcess = true
+	triggerSellAllNow()
+	isSellingInProcess = false
+end)
+
+ExitBtn.MouseButton1Click:Connect(function()
+	AutoPanEnabled = false
+	AutoSellEnabled = false
+	AutoScanPanEnabled = false
+	AntiAFKEnabled = false
+	ScreenGui:Destroy()
+end)
+
+print("[Ultimate Auto Farm & Anti-AFK]: Script loaded successfully!")
