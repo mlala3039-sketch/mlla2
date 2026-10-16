@@ -1,5 +1,5 @@
 -- =================================================================
--- ULTIMATE ALL-IN-ONE AUTO FARM & ANTI-AFK (ROBLOX SCRIPT)
+-- ULTIMATE ALL-IN-ONE AUTO FARM & ANTI-AFK (MOBILE COMPACT VERSION)
 -- =================================================================
 
 local Players = game:GetService("Players")
@@ -52,7 +52,6 @@ local zeroFillStartTime = os.clock()
 -- 3. LOGIKA ANTI-AFK & AUTO-RECONNECT
 -- =================================================================
 
--- Mencegah Kick saat Idle / Diam (20+ menit)
 LocalPlayer.Idled:Connect(function()
 	if AntiAFKEnabled then
 		VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
@@ -61,7 +60,6 @@ LocalPlayer.Idled:Connect(function()
 	end
 end)
 
--- Auto Reconnect jika terputus dari server
 pcall(function()
 	CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
 		if child.Name == "ErrorPrompt" then
@@ -72,7 +70,7 @@ pcall(function()
 end)
 
 -- =================================================================
--- 4. HELPER FUNCTIONS AUTO FARM
+-- 4. HELPER FUNCTIONS
 -- =================================================================
 
 local function getCurrentCFrame()
@@ -117,10 +115,8 @@ local function getEquippedPan()
 	return nil
 end
 
--- DETEKSI KAPASITAS TAS DARI PLAYER BACKPACK
 local function getBackpackInfo()
 	local currentCount = 0
-
 	local bp1 = LocalPlayer:FindFirstChild("Backpack")
 	local bp2 = LocalPlayer:FindFirstChild("BackpackTwo")
 	
@@ -138,7 +134,6 @@ local function getBackpackInfo()
 	return currentCount, TargetMaxSpace
 end
 
--- DETEKSI NILAI FILL KUALI DARI PAN & UI GAME
 local function getPanFillInfo()
 	local panTool = getEquippedPan()
 	local currentFill = 0
@@ -166,7 +161,6 @@ local function getPanFillInfo()
 	return currentFill, maxCapacity
 end
 
--- AUTO SCAN & KLIK TOMBOL AUTO PAN GAME
 local function ensureInGameAutoPanEnabled()
 	if not AutoScanPanEnabled then return end
 	
@@ -307,14 +301,12 @@ local function runAutoLoop()
 				forceResetTool()
 			end
 
-			-- LOGIKA AUTO SELL PENUH
 			if itemCount >= maxBackpackSpace and AutoSellEnabled and not isSellingInProcess then
 				isSellingInProcess = true
 				triggerSellAllNow()
 				isSellingInProcess = false
 			end
 
-			-- LOGIKA AUTO COLLECT / SHAKE / STUCK CHECK
 			if AutoPanEnabled and not isSellingInProcess and character and hrp then
 				local panTool = getEquippedPan()
 
@@ -337,7 +329,6 @@ local function runAutoLoop()
 						lastFillChangeTime = os.clock()
 					end
 
-					-- Deteksi Stuck di 0 selama > 2.5 detik
 					if currentFill == 0 then
 						if os.clock() - zeroFillStartTime > 2.5 then
 							isSellingInProcess = true
@@ -348,7 +339,6 @@ local function runAutoLoop()
 						zeroFillStartTime = os.clock()
 					end
 
-					-- Deteksi Stuck Fill di tengah jalan > 1.5 detik
 					local isFillStuck = (currentFill > 0) and (os.clock() - lastFillChangeTime > 1.5)
 
 					if isFillStuck then
@@ -356,7 +346,6 @@ local function runAutoLoop()
 						triggerSellAllNow()
 						isSellingInProcess = false
 
-					-- STATE NORMAL: PENUH OR PANNING -> SHAKE DI TP 2
 					elseif isPanning or currentFill >= maxCapacity then
 						if TP2_CFrame then teleportTo(TP2_CFrame) end
 
@@ -373,7 +362,6 @@ local function runAutoLoop()
 							lastActionTime = os.clock()
 						end
 
-					-- STATE BELUM PENUH -> TP 1 & MENGGALI
 					else
 						if itemCount < maxBackpackSpace then
 							if TP1_CFrame then teleportTo(TP1_CFrame) end
@@ -395,7 +383,7 @@ local function runAutoLoop()
 end
 
 -- =================================================================
--- 6. INTERFACE (GUI PANEL & GABUNGAN ANTI-AFK TOGGLE)
+-- 6. MOBILE COMPACT GUI (SANGAT COCOK UNTUK HP)
 -- =================================================================
 
 if PlayerGui:FindFirstChild("UltimateAutoFarmGui") then
@@ -407,9 +395,10 @@ ScreenGui.Name = "UltimateAutoFarmGui"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = PlayerGui
 
+-- MainFrame Ukuran Mini HP (Width: 180, Height: 310)
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 270, 0, 445)
-MainFrame.Position = UDim2.new(0.05, 0, 0.22, 0)
+MainFrame.Size = UDim2.new(0, 180, 0, 310)
+MainFrame.Position = UDim2.new(0.68, 0, 0.15, 0) -- Ditaruh di sisi kanan atas
 MainFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -417,96 +406,97 @@ MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 10)
+MainCorner.CornerRadius = UDim.new(0, 8)
 MainCorner.Parent = MainFrame
 
--- Title
+-- Judul Ringkas
 local TitleText = Instance.new("TextLabel")
-TitleText.Size = UDim2.new(1, -30, 0, 32)
-TitleText.Position = UDim2.new(0, 10, 0, 0)
+TitleText.Size = UDim2.new(1, -24, 0, 24)
+TitleText.Position = UDim2.new(0, 6, 0, 2)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "Auto Farm + Anti-AFK"
+TitleText.Text = "Auto Farm (HP)"
 TitleText.TextColor3 = Color3.fromRGB(0, 255, 200)
-TitleText.TextSize = 11
+TitleText.TextSize = 10
 TitleText.Font = Enum.Font.GothamBold
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 TitleText.Parent = MainFrame
 
--- Exit Button (X)
+-- Tombol Keluar (X)
 local ExitBtn = Instance.new("TextButton")
-ExitBtn.Size = UDim2.new(0, 24, 0, 24)
-ExitBtn.Position = UDim2.new(1, -27, 0, 4)
+ExitBtn.Size = UDim2.new(0, 18, 0, 18)
+ExitBtn.Position = UDim2.new(1, -21, 0, 4)
 ExitBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 ExitBtn.Text = "X"
 ExitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ExitBtn.TextSize = 9
 ExitBtn.Font = Enum.Font.GothamBold
 ExitBtn.Parent = MainFrame
 
 local ExitCorner = Instance.new("UICorner")
-ExitCorner.CornerRadius = UDim.new(0, 6)
+ExitCorner.CornerRadius = UDim.new(0, 4)
 ExitCorner.Parent = ExitBtn
 
--- Set TP Buttons
+-- Set TP Buttons Row
 local SetTP1Btn = Instance.new("TextButton")
-SetTP1Btn.Size = UDim2.new(0.28, 0, 0, 26)
-SetTP1Btn.Position = UDim2.new(0.05, 0, 0.08, 0)
+SetTP1Btn.Size = UDim2.new(0.28, 0, 0, 22)
+SetTP1Btn.Position = UDim2.new(0.04, 0, 0.09, 0)
 SetTP1Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
-SetTP1Btn.Text = "Set TP 1"
+SetTP1Btn.Text = "TP 1"
 SetTP1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SetTP1Btn.Font = Enum.Font.GothamBold
-SetTP1Btn.TextSize = 10
+SetTP1Btn.TextSize = 8
 SetTP1Btn.Parent = MainFrame
 
 local SetTP2Btn = Instance.new("TextButton")
-SetTP2Btn.Size = UDim2.new(0.28, 0, 0, 26)
-SetTP2Btn.Position = UDim2.new(0.36, 0, 0.08, 0)
+SetTP2Btn.Size = UDim2.new(0.28, 0, 0, 22)
+SetTP2Btn.Position = UDim2.new(0.36, 0, 0.09, 0)
 SetTP2Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
-SetTP2Btn.Text = "Set TP 2"
+SetTP2Btn.Text = "TP 2"
 SetTP2Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SetTP2Btn.Font = Enum.Font.GothamBold
-SetTP2Btn.TextSize = 10
+SetTP2Btn.TextSize = 8
 SetTP2Btn.Parent = MainFrame
 
 local SetTPNPCBtn = Instance.new("TextButton")
-SetTPNPCBtn.Size = UDim2.new(0.28, 0, 0, 26)
-SetTPNPCBtn.Position = UDim2.new(0.67, 0, 0.08, 0)
+SetTPNPCBtn.Size = UDim2.new(0.28, 0, 0, 22)
+SetTPNPCBtn.Position = UDim2.new(0.68, 0, 0.09, 0)
 SetTPNPCBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
-SetTPNPCBtn.Text = "Set NPC"
+SetTPNPCBtn.Text = "NPC"
 SetTPNPCBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SetTPNPCBtn.Font = Enum.Font.GothamBold
-SetTPNPCBtn.TextSize = 10
+SetTPNPCBtn.TextSize = 8
 SetTPNPCBtn.Parent = MainFrame
 
 for _, btn in ipairs({SetTP1Btn, SetTP2Btn, SetTPNPCBtn}) do
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, 6)
+	c.CornerRadius = UDim.new(0, 4)
 	c.Parent = btn
 end
 
 -- Item Counter Label
 local ItemCounterLabel = Instance.new("TextLabel")
-ItemCounterLabel.Size = UDim2.new(0.9, 0, 0, 24)
-ItemCounterLabel.Position = UDim2.new(0.05, 0, 0.15, 0)
+ItemCounterLabel.Size = UDim2.new(0.92, 0, 0, 18)
+ItemCounterLabel.Position = UDim2.new(0.04, 0, 0.18, 0)
 ItemCounterLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
 ItemCounterLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
 ItemCounterLabel.Font = Enum.Font.GothamMedium
-ItemCounterLabel.TextSize = 10
-ItemCounterLabel.Text = "Item Count: 0 / 792"
+ItemCounterLabel.TextSize = 8
+ItemCounterLabel.Text = "Item: 0 / 792"
 ItemCounterLabel.Parent = MainFrame
 
 local CounterCorner = Instance.new("UICorner")
-CounterCorner.CornerRadius = UDim.new(0, 6)
+CounterCorner.CornerRadius = UDim.new(0, 4)
 CounterCorner.Parent = ItemCounterLabel
 
--- SLIDER FITUR (1 - 2000)
+-- Slider Minimalis
 local SliderFrame = Instance.new("Frame")
-SliderFrame.Size = UDim2.new(0.9, 0, 0, 16)
-SliderFrame.Position = UDim2.new(0.05, 0, 0.22, 0)
+SliderFrame.Size = UDim2.new(0.92, 0, 0, 12)
+SliderFrame.Position = UDim2.new(0.04, 0, 0.25, 0)
 SliderFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
 SliderFrame.Parent = MainFrame
 
 local SliderCorner = Instance.new("UICorner")
-SliderCorner.CornerRadius = UDim.new(0, 8)
+SliderCorner.CornerRadius = UDim.new(0, 6)
 SliderCorner.Parent = SliderFrame
 
 local SliderFill = Instance.new("Frame")
@@ -515,7 +505,7 @@ SliderFill.BackgroundColor3 = Color3.fromRGB(0, 200, 150)
 SliderFill.Parent = SliderFrame
 
 local SliderFillCorner = Instance.new("UICorner")
-SliderFillCorner.CornerRadius = UDim.new(0, 8)
+SliderFillCorner.CornerRadius = UDim.new(0, 6)
 SliderFillCorner.Parent = SliderFill
 
 local SliderBtn = Instance.new("TextButton")
@@ -552,85 +542,84 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
--- Toggle Buttons
+-- Toggle Buttons Compact
 local ToggleFarmBtn = Instance.new("TextButton")
-ToggleFarmBtn.Size = UDim2.new(0.9, 0, 0, 26)
-ToggleFarmBtn.Position = UDim2.new(0.05, 0, 0.28, 0)
+ToggleFarmBtn.Size = UDim2.new(0.92, 0, 0, 22)
+ToggleFarmBtn.Position = UDim2.new(0.04, 0, 0.31, 0)
 ToggleFarmBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 ToggleFarmBtn.Text = "Auto Farm: OFF"
 ToggleFarmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleFarmBtn.Font = Enum.Font.GothamBold
-ToggleFarmBtn.TextSize = 10
+ToggleFarmBtn.TextSize = 8
 ToggleFarmBtn.Parent = MainFrame
 
 local ToggleSellBtn = Instance.new("TextButton")
-ToggleSellBtn.Size = UDim2.new(0.9, 0, 0, 26)
-ToggleSellBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
+ToggleSellBtn.Size = UDim2.new(0.92, 0, 0, 22)
+ToggleSellBtn.Position = UDim2.new(0.04, 0, 0.40, 0)
 ToggleSellBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-ToggleSellBtn.Text = "Auto Sell (Saat Penuh): OFF"
+ToggleSellBtn.Text = "Auto Sell: OFF"
 ToggleSellBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleSellBtn.Font = Enum.Font.GothamBold
-ToggleSellBtn.TextSize = 10
+ToggleSellBtn.TextSize = 8
 ToggleSellBtn.Parent = MainFrame
 
 local ToggleScanBtn = Instance.new("TextButton")
-ToggleScanBtn.Size = UDim2.new(0.9, 0, 0, 26)
-ToggleScanBtn.Position = UDim2.new(0.05, 0, 0.42, 0)
+ToggleScanBtn.Size = UDim2.new(0.92, 0, 0, 22)
+ToggleScanBtn.Position = UDim2.new(0.04, 0, 0.49, 0)
 ToggleScanBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 ToggleScanBtn.Text = "Auto Scan Green: OFF"
 ToggleScanBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleScanBtn.Font = Enum.Font.GothamBold
-ToggleScanBtn.TextSize = 10
+ToggleScanBtn.TextSize = 8
 ToggleScanBtn.Parent = MainFrame
 
--- Tombol Toggle Anti-AFK Tambahan di Panel
 local ToggleAntiAFKBtn = Instance.new("TextButton")
-ToggleAntiAFKBtn.Size = UDim2.new(0.9, 0, 0, 26)
-ToggleAntiAFKBtn.Position = UDim2.new(0.05, 0, 0.49, 0)
+ToggleAntiAFKBtn.Size = UDim2.new(0.92, 0, 0, 22)
+ToggleAntiAFKBtn.Position = UDim2.new(0.04, 0, 0.58, 0)
 ToggleAntiAFKBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
-ToggleAntiAFKBtn.Text = "Anti-AFK & Reconnect: ON"
+ToggleAntiAFKBtn.Text = "Anti-AFK: ON"
 ToggleAntiAFKBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleAntiAFKBtn.Font = Enum.Font.GothamBold
-ToggleAntiAFKBtn.TextSize = 10
+ToggleAntiAFKBtn.TextSize = 8
 ToggleAntiAFKBtn.Parent = MainFrame
 
 local ManualSellBtn = Instance.new("TextButton")
-ManualSellBtn.Size = UDim2.new(0.9, 0, 0, 26)
-ManualSellBtn.Position = UDim2.new(0.05, 0, 0.56, 0)
+ManualSellBtn.Size = UDim2.new(0.92, 0, 0, 22)
+ManualSellBtn.Position = UDim2.new(0.04, 0, 0.67, 0)
 ManualSellBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 200)
-ManualSellBtn.Text = "⚡ Sell All Items Now (3x)"
+ManualSellBtn.Text = "⚡ Sell Now (3x)"
 ManualSellBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ManualSellBtn.Font = Enum.Font.GothamBold
-ManualSellBtn.TextSize = 10
+ManualSellBtn.TextSize = 8
 ManualSellBtn.Parent = MainFrame
 
 for _, btn in ipairs({ToggleFarmBtn, ToggleSellBtn, ToggleScanBtn, ToggleAntiAFKBtn, ManualSellBtn}) do
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, 6)
+	c.CornerRadius = UDim.new(0, 4)
 	c.Parent = btn
 end
 
 local StatusInfoLabel = Instance.new("TextLabel")
-StatusInfoLabel.Size = UDim2.new(0.9, 0, 0, 45)
-StatusInfoLabel.Position = UDim2.new(0.05, 0, 0.64, 0)
+StatusInfoLabel.Size = UDim2.new(0.92, 0, 0, 38)
+StatusInfoLabel.Position = UDim2.new(0.04, 0, 0.76, 0)
 StatusInfoLabel.BackgroundTransparency = 1
 StatusInfoLabel.Text = "TP 1: Unset\nTP 2: Unset\nNPC: Unset"
 StatusInfoLabel.TextColor3 = Color3.fromRGB(160, 220, 255)
-StatusInfoLabel.TextSize = 9
+StatusInfoLabel.TextSize = 7.5
 StatusInfoLabel.Font = Enum.Font.Gotham
 StatusInfoLabel.TextWrapped = true
 StatusInfoLabel.TextYAlignment = Enum.TextYAlignment.Top
 StatusInfoLabel.Parent = MainFrame
 
--- Item Counter Loop Update
+-- Loop Deteksi Item
 task.spawn(function()
 	while ScreenGui.Parent do
 		local count, maxSpace = getBackpackInfo()
 		if count >= maxSpace then
-			ItemCounterLabel.Text = "Item Count: " .. count .. " / " .. maxSpace .. " (TAS PENUH!)"
+			ItemCounterLabel.Text = "Item: " .. count .. " / " .. maxSpace .. " (PENUH!)"
 			ItemCounterLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
 		else
-			ItemCounterLabel.Text = "Item Count: " .. count .. " / " .. maxSpace
+			ItemCounterLabel.Text = "Item: " .. count .. " / " .. maxSpace
 			ItemCounterLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
 		end
 		task.wait(0.2)
@@ -689,12 +678,12 @@ end)
 ToggleSellBtn.MouseButton1Click:Connect(function()
 	AutoSellEnabled = not AutoSellEnabled
 	if AutoSellEnabled then
-		ToggleSellBtn.Text = "Auto Sell (Saat Penuh): ON"
+		ToggleSellBtn.Text = "Auto Sell: ON"
 		ToggleSellBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
 		lastActionTime = os.clock()
 		runAutoLoop()
 	else
-		ToggleSellBtn.Text = "Auto Sell (Saat Penuh): OFF"
+		ToggleSellBtn.Text = "Auto Sell: OFF"
 		ToggleSellBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 	end
 end)
@@ -714,10 +703,10 @@ end)
 ToggleAntiAFKBtn.MouseButton1Click:Connect(function()
 	AntiAFKEnabled = not AntiAFKEnabled
 	if AntiAFKEnabled then
-		ToggleAntiAFKBtn.Text = "Anti-AFK & Reconnect: ON"
+		ToggleAntiAFKBtn.Text = "Anti-AFK: ON"
 		ToggleAntiAFKBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
 	else
-		ToggleAntiAFKBtn.Text = "Anti-AFK & Reconnect: OFF"
+		ToggleAntiAFKBtn.Text = "Anti-AFK: OFF"
 		ToggleAntiAFKBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 	end
 end)
@@ -736,4 +725,4 @@ ExitBtn.MouseButton1Click:Connect(function()
 	ScreenGui:Destroy()
 end)
 
-print("[Ultimate Auto Farm & Anti-AFK]: Script loaded successfully!")
+print("[Mobile Compact Auto Farm]: Loaded!")
